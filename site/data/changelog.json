@@ -1,0 +1,8 @@
+[
+  {"date": "Mar 10", "tag": "NEW",    "title": "MCP Protocol — D365 as AI Tool Provider", "section": "Agentic AI", "level": "Expert"},
+  {"date": "Mar 08", "tag": "LESSON", "title": "Agentic AI Architecture for D365",         "section": "Agentic AI", "level": "Expert"},
+  {"date": "Mar 06", "tag": "LESSON", "title": "Financial Posting & Ledger Framework",     "section": "Finance",    "level": "Expert"},
+  {"date": "Mar 04", "tag": "LESSON", "title": "Security: Roles, Duties, XDS & SOD",      "section": "Configuration","level": "Expert"},
+  {"date": "Mar 02", "tag": "LESSON", "title": "Workflow Framework",                       "section": "Batch & Workflow","level": "Expert"},
+  {"date": "Mar 01", "tag": "LAUNCH", "title": "D365 Dev Hub launched with 12 lessons!",  "section": "System",     "level": "Info"}
+]

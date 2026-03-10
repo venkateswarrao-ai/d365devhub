@@ -1,0 +1,134 @@
+[
+  {
+    "id": "xpp_intro",
+    "title": "Introduction to X++ & AOT",
+    "section": "X++ Language",
+    "level": "Beginner",
+    "duration": "15 min read",
+    "tags": ["X++", "AOT", "Basics"],
+    "summary": "Learn the fundamentals of X++ programming language and the Application Object Tree.",
+    "generated_date": "2025-03-01",
+    "auto_generated": false
+  },
+  {
+    "id": "xpp_types",
+    "title": "Base Types, EDTs & Enums",
+    "section": "X++ Language",
+    "level": "Beginner",
+    "duration": "20 min read",
+    "tags": ["EDTs", "Enums", "Types"],
+    "summary": "Master base data types, Extended Data Types, and Enumerations in D365 F&O.",
+    "generated_date": "2025-03-01",
+    "auto_generated": false
+  },
+  {
+    "id": "xpp_select",
+    "title": "Select Statements & Data Access",
+    "section": "X++ Language",
+    "level": "Beginner",
+    "duration": "25 min read",
+    "tags": ["Select", "Query", "Data Access"],
+    "summary": "Master X++ select statements for efficient data retrieval from D365 F&O tables.",
+    "generated_date": "2025-03-01",
+    "auto_generated": false
+  },
+  {
+    "id": "xpp_tables",
+    "title": "Tables, CRUD & Transactions",
+    "section": "X++ Language",
+    "level": "Beginner",
+    "duration": "30 min read",
+    "tags": ["Tables", "CRUD", "ttsbegin", "ttscommit"],
+    "summary": "Learn CRUD operations and transaction management in D365 F&O.",
+    "generated_date": "2025-03-01",
+    "auto_generated": false
+  },
+  {
+    "id": "xpp_classes",
+    "title": "Classes, Interfaces & Inheritance",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "35 min read",
+    "tags": ["OOP", "Classes", "Interfaces"],
+    "summary": "Object-oriented programming patterns in X++ with classes and interfaces.",
+    "generated_date": "2025-03-01",
+    "auto_generated": false
+  },
+  {
+    "id": "xpp_coc",
+    "title": "Extensions & Chain of Command",
+    "section": "Extensions",
+    "level": "Intermediate",
+    "duration": "30 min read",
+    "tags": ["CoC", "Extensions", "Override"],
+    "summary": "Extend D365 F&O behavior using Chain of Command without overlayering.",
+    "generated_date": "2025-03-01",
+    "auto_generated": false
+  },
+  {
+    "id": "xpp_batch",
+    "title": "Batch Jobs & SysOperation Framework",
+    "section": "Batch & Workflow",
+    "level": "Intermediate",
+    "duration": "35 min read",
+    "tags": ["Batch", "SysOperation", "Background"],
+    "summary": "Build robust batch jobs using the SysOperation framework.",
+    "generated_date": "2025-03-01",
+    "auto_generated": false
+  },
+  {
+    "id": "xpp_workflow",
+    "title": "Workflow Framework",
+    "section": "Batch & Workflow",
+    "level": "Expert",
+    "duration": "45 min read",
+    "tags": ["Workflow", "Approval", "Provider"],
+    "summary": "Configure and extend D365 F&O workflow framework.",
+    "generated_date": "2025-03-01",
+    "auto_generated": false
+  },
+  {
+    "id": "xpp_security",
+    "title": "Security: Roles, Duties, XDS & SOD",
+    "section": "Configuration",
+    "level": "Expert",
+    "duration": "40 min read",
+    "tags": ["Security", "XDS", "Roles", "SOD"],
+    "summary": "Implement D365 F&O security with roles, duties, privileges and XDS policies.",
+    "generated_date": "2025-03-01",
+    "auto_generated": false
+  },
+  {
+    "id": "xpp_financial",
+    "title": "Financial Posting & Ledger Framework",
+    "section": "Finance",
+    "level": "Expert",
+    "duration": "50 min read",
+    "tags": ["Ledger", "Posting", "Finance"],
+    "summary": "Master the D365 F&O financial posting engine and ledger framework.",
+    "generated_date": "2025-03-01",
+    "auto_generated": false
+  },
+  {
+    "id": "ai_intro",
+    "title": "Agentic AI Architecture for D365",
+    "section": "Agentic AI",
+    "level": "Expert",
+    "duration": "40 min read",
+    "tags": ["AI", "LangChain", "Agents"],
+    "summary": "Design AI agents that interact with D365 F&O autonomously.",
+    "generated_date": "2025-03-01",
+    "auto_generated": false
+  },
+  {
+    "id": "ai_mcp",
+    "title": "MCP Protocol — D365 as AI Tool Provider",
+    "section": "Agentic AI",
+    "level": "Expert",
+    "duration": "45 min read",
+    "tags": ["MCP", "AI", "Protocol"],
+    "summary": "Expose D365 F&O capabilities as tools via the Model Context Protocol.",
+    "generated_date": "2025-03-01",
+    "auto_generated": false
+  }
+]

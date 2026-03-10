@@ -46,7 +46,9 @@ jobs:
         run: |
           git config user.name "D365DevHub Bot"
           git config user.email "bot@d365devhub.com"
+          git pull --rebase origin main
           git add site/data/
           LESSON_TITLE=$(cat site/data/latest_lesson_title.txt 2>/dev/null || echo "New Lesson")
           git commit -m "🤖 Auto-lesson: ${LESSON_TITLE} [$(date '+%d %b %Y')]"
+          git push
           git push

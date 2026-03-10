@@ -2,7 +2,7 @@ name: 🤖 Auto-Generate D365 Lesson
 
 on:
   schedule:
-    - cron: '0 3 */2 * *'
+    - cron: '0 3 */2 * *'   # every 2 days at 03:00 UTC = 08:30 IST
   workflow_dispatch:
 
 permissions:
@@ -33,36 +33,35 @@ jobs:
           ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
         run: python scripts/generate_lesson.py
 
-      - name: ✅ Check if lesson was generated
-        id: check
-        run: |
-          if git diff --quiet && git diff --staged --quiet; then
-            echo "changed=false" >> $GITHUB_OUTPUT
-            echo "No new content generated"
-          else
-            echo "changed=true" >> $GITHUB_OUTPUT
-            echo "New lesson generated!"
-          fi
-
-      - name: 📤 Commit and push new lesson
-        if: steps.check.outputs.changed == 'true'
+      - name: 📤 Commit and push
         run: |
           git config user.name  "D365DevHub Bot"
           git config user.email "bot@d365devhub.com"
+          # Add ALL generated data files:
+          # - lessons.json       (new lesson content)
+          # - topic_tracker.json (marks topic as done → next run picks next topic)
+          # - changelog.json     (home page updates)
+          # - latest_lesson_title.txt
           git add site/data/
-          git stash --include-untracked || true
-          git fetch origin main
-          git reset --soft origin/main || true
-          git add site/data/
-          LESSON_TITLE=$(cat site/data/latest_lesson_title.txt 2>/dev/null || echo "New Lesson")
-          git commit -m "🤖 Auto-lesson: ${LESSON_TITLE} [$(date '+%d %b %Y')]" || echo "Nothing to commit"
-          git push origin main
+          # Only commit if there are actual changes
+          if git diff --staged --quiet; then
+            echo "⏭️  No changes to commit — topic may already exist"
+          else
+            LESSON_TITLE=$(cat site/data/latest_lesson_title.txt 2>/dev/null || echo "New Lesson")
+            git commit -m "🤖 Auto-lesson: ${LESSON_TITLE} [$(date '+%d %b %Y')]"
+            git push origin main
+            echo "✅ Pushed: ${LESSON_TITLE}"
+          fi
 
       - name: 🎉 Summary
         run: |
           echo "## Automation Run Summary" >> $GITHUB_STEP_SUMMARY
-          echo "- Date: $(date '+%d %b %Y %H:%M IST')" >> $GITHUB_STEP_SUMMARY
+          echo "- **Date:** $(date '+%d %b %Y %H:%M IST')" >> $GITHUB_STEP_SUMMARY
           TITLE=$(cat site/data/latest_lesson_title.txt 2>/dev/null || echo "Unknown")
-          echo "- Lesson: ${TITLE}" >> $GITHUB_STEP_SUMMARY
-          TOTAL=$(python3 -c "import json; print(len(json.load(open('site/data/lessons.json'))))" 2>/dev/null || echo "?")
-          echo "- Total lessons on site: ${TOTAL}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Lesson:** ${TITLE}" >> $GITHUB_STEP_SUMMARY
+          TOTAL=$(python3 -c "import json; d=json.load(open('site/data/lessons.json')); print(len([x for x in d if x.get('auto_generated')]))" 2>/dev/null || echo "?")
+          echo "- **Auto-generated lessons:** ${TOTAL}" >> $GITHUB_STEP_SUMMARY
+          DONE=$(python3 -c "import json; d=json.load(open('site/data/topic_tracker.json')); print(len(d['completed']))" 2>/dev/null || echo "?")
+          TOTAL_POOL=65
+          echo "- **Topics completed:** ${DONE} / ${TOTAL_POOL}" >> $GITHUB_STEP_SUMMARY
+          echo "- **Topics remaining:** $((${TOTAL_POOL} - ${DONE:-0}))" >> $GITHUB_STEP_SUMMARY

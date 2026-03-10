@@ -7779,9 +7779,97 @@ function renderChangelog() {
     </div>`).join('');
 }
 // ── INIT ──────────────────────────────────────────────
+
+// ── AUTO-LESSON LOADER ─────────────────────────────────────────
+async function fetchAndMergeAutoLessons() {
+  try {
+    const res = await fetch('./data/lessons.json?t=' + Date.now());
+    if (!res.ok) return;
+    const autoLessons = await res.json();
+    let newCount = 0;
+    autoLessons.forEach(lesson => {
+      if (LESSONS[lesson.id]) return;
+      if (!lesson.auto_generated) return;
+      const codeHtml = (lesson.content?.code_examples || []).map(ex =>
+        '<div style="margin-bottom:20px"><strong style="color:var(--accent)">' + ex.title + '</strong>' +
+        '<p style="color:var(--muted);font-size:.82rem;margin:4px 0 8px">' + ex.description + '</p>' +
+        '<pre class="code-block"><code>' + (ex.code||'').replace(/</g,'&lt;').replace(/>/g,'&gt;') + '</code></pre></div>'
+      ).join('');
+      LESSONS[lesson.id] = {
+        title:    lesson.title,
+        section:  lesson.section,
+        level:    lesson.level,
+        duration: lesson.duration || '30 min read',
+        tags:     lesson.tags || [],
+        content: {
+          overview:  lesson.content?.overview || lesson.summary || '',
+          theory:    lesson.content?.theory || '',
+          code:      codeHtml,
+          keyPoints: lesson.content?.key_points || [],
+          gotchas:   lesson.content?.gotchas || [],
+          perfTips:  lesson.content?.performance_tips || [],
+          quiz:      lesson.content?.quiz || [],
+        },
+        auto_generated:  true,
+        generated_date:  lesson.generated_date
+      };
+      const sectionName = lesson.section || 'Auto-Generated';
+      let sec = SIDEBAR_SECTIONS.find(s => s.title === sectionName);
+      if (!sec) {
+        SIDEBAR_SECTIONS.push({ title: sectionName, items: [] });
+        sec = SIDEBAR_SECTIONS[SIDEBAR_SECTIONS.length - 1];
+      }
+      if (!sec.items.find(i => i.id === lesson.id)) {
+        const icon = lesson.level === 'Beginner' ? '📗' : lesson.level === 'Intermediate' ? '📘' : '📕';
+        sec.items.push({ id: lesson.id, icon, label: lesson.title });
+      }
+      newCount++;
+    });
+    if (newCount > 0) {
+      console.log('Loaded ' + newCount + ' auto-generated lesson(s)');
+      buildSidebar();
+      // Show toast notification
+      toast('🆕 ' + newCount + ' new lesson' + (newCount > 1 ? 's' : '') + ' available in Learn!', 'info');
+      // Add NEW badge to Learn nav button
+      const learnBtn = document.querySelector('[onclick*="learn"]');
+      if (learnBtn && !learnBtn.querySelector('.new-badge')) {
+        const badge = document.createElement('span');
+        badge.className = 'new-badge';
+        badge.textContent = 'NEW';
+        badge.style.cssText = 'background:var(--accent);color:#000;font-size:.5rem;font-weight:800;padding:1px 5px;border-radius:4px;margin-left:6px;vertical-align:middle;font-family:"JetBrains Mono",monospace;letter-spacing:.05em';
+        learnBtn.appendChild(badge);
+      }
+      // Mark new lessons with a badge in sidebar
+      autoLessons.forEach(lesson => {
+        if (!lesson.auto_generated) return;
+        const sbEl = document.getElementById('sb-' + lesson.id);
+        if (sbEl && !sbEl.querySelector('.new-lesson-dot')) {
+          const dot = document.createElement('span');
+          dot.className = 'new-lesson-dot';
+          dot.title = 'Auto-generated lesson';
+          dot.style.cssText = 'display:inline-block;width:6px;height:6px;background:var(--accent);border-radius:50%;margin-left:6px;vertical-align:middle;animation:pulse 2s infinite';
+          sbEl.querySelector('.sb-label')?.appendChild(dot);
+        }
+      });
+    }
+  } catch(e) {
+    console.log('Auto-lesson loader: offline/local mode');
+  }
+}
+
+async function fetchAndMergeChangelog() {
+  try {
+    const res = await fetch('./data/changelog.json?t=' + Date.now());
+    if (!res.ok) return;
+    window.CHANGELOG = await res.json();
+    renderChangelog();
+  } catch(e) {}
+}
+
 document.addEventListener('DOMContentLoaded', ()=>{
   showPage('home');
-  renderChangelog();
+  fetchAndMergeChangelog();
+  fetchAndMergeAutoLessons();
 });
 
 function showOOBRef() {

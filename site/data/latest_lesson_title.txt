@@ -1,1 +1,1 @@
-Delegates & Event-Driven X++
+Cross-Company Queries in X++

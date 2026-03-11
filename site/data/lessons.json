@@ -374,5 +374,102 @@
     },
     "generated_date": "2026-03-10",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_crosscompany",
+    "title": "Cross-Company Queries in X++",
+    "section": "X++ Language",
+    "level": "Expert",
+    "duration": "25 min read",
+    "tags": [
+      "cross-company",
+      "query",
+      "performance",
+      "security",
+      "multi-entity"
+    ],
+    "summary": "Master cross-company data operations in D365 F&O using crossCompany, changeCompany, and advanced patterns for multi-entity scenarios.",
+    "content": {
+      "overview": "Cross-company queries are fundamental for multi-entity D365 F&O implementations where data must be accessed across legal entities. Unlike traditional single-company operations, cross-company scenarios require careful handling of company context, security boundaries, and performance considerations. D365 F&O provides several mechanisms including the crossCompany keyword, changeCompany statement, and Query framework extensions that enable developers to traverse company boundaries safely and efficiently. Understanding these patterns is crucial for enterprise implementations where consolidated reporting, inter-company transactions, and shared master data scenarios are common. The framework automatically handles company filtering in most cases, but cross-company operations require explicit developer intervention and proper security model implementation.",
+      "theory": "D365 F&O's multi-company architecture is built on the concept of DataAreaId, which acts as a partition key for most transactional tables. The kernel maintains company context through the curext() function and CompanyInfo singleton, ensuring data isolation by default. Cross-company operations bypass this isolation through three primary mechanisms: the crossCompany keyword in select statements, the changeCompany statement for context switching, and the Query class's allowCrossCompany() method. The SysQuery framework provides additional cross-company capabilities through CrossCompanyQueryUtils and the QueryBuildDataSource.allowCrossCompany() method. Security is enforced through the XDSSecurityPolicy framework, which can restrict cross-company access based on user permissions and table-level security policies. Performance considerations include the fact that crossCompany queries cannot use indexes that include DataAreaId, forcing table scans in some scenarios. The RecordLevelSecurity framework also interacts with cross-company operations, requiring careful consideration of which companies a user can access through role-based security.",
+      "code_examples": [
+        {
+          "title": "Basic crossCompany Query with Error Handling",
+          "description": "Demonstrates fundamental cross-company query syntax with proper error handling and security validation",
+          "language": "xpp",
+          "code": "static void CrossCompanyBasicExample(Args _args)\n{\n    CustTable       custTable;\n    CompanyInfo     companyInfo;\n    container       allowedCompanies;\n    int             recordCount;\n    \n    try\n    {\n        // Build list of allowed companies for security\n        while select companyInfo\n            where companyInfo.DataArea != ''\n        {\n            if (SecurityRights::hasTableAccess(tableNum(CustTable), \n                                              AccessType::View,\n                                              companyInfo.DataArea))\n            {\n                allowedCompanies += companyInfo.DataArea;\n            }\n        }\n        \n        // Cross-company query with security validation\n        while select crossCompany : allowedCompanies\n               AccountNum, Name, dataAreaId from custTable\n            where custTable.Blocked == CustVendorBlocked::No\n        {\n            recordCount++;\n            info(strFmt(\"Customer: %1, Company: %2, Name: %3\",\n                       custTable.AccountNum,\n                       custTable.dataAreaId,\n                       custTable.Name));\n            \n            // Prevent runaway queries in production\n            if (recordCount > 1000)\n            {\n                warning(\"Query limited to 1000 records for performance\");\n                break;\n            }\n        }\n        \n        info(strFmt(\"%1 customers found across %2 companies\",\n                   recordCount,\n                   conLen(allowedCompanies)));\n    }\n    catch (Exception::Error)\n    {\n        error(\"Cross-company query failed: \" + infolog.text());\n    }\n}"
+        },
+        {
+          "title": "Advanced Query Framework Cross-Company Pattern",
+          "description": "Production-grade cross-company implementation using Query framework with joins and complex filtering",
+          "language": "xpp",
+          "code": "static container GetCustomerInvoiceSummary()\n{\n    Query                   query;\n    QueryBuildDataSource    qbdsCustTable, qbdsCustInvoiceJour;\n    QueryBuildRange         qbrDateRange;\n    QueryRun                queryRun;\n    CustTable               custTable;\n    CustInvoiceJour         custInvoiceJour;\n    container               result;\n    real                    totalAmount;\n    \n    try\n    {\n        // Build query programmatically for complex cross-company scenarios\n        query = new Query();\n        \n        // Main customer table datasource\n        qbdsCustTable = query.addDataSource(tableNum(CustTable));\n        qbdsCustTable.addRange(fieldNum(CustTable, Blocked))\n                     .value(queryValue(CustVendorBlocked::No));\n        \n        // Enable cross-company for customer master\n        qbdsCustTable.allowCrossCompany(true);\n        \n        // Join to invoice journal\n        qbdsCustInvoiceJour = qbdsCustTable.addDataSource(tableNum(CustInvoiceJour));\n        qbdsCustInvoiceJour.joinMode(JoinMode::InnerJoin);\n        qbdsCustInvoiceJour.relations(true);\n        \n        // Enable cross-company for transactions\n        qbdsCustInvoiceJour.allowCrossCompany(true);\n        \n        // Date range filter - last 12 months\n        qbrDateRange = qbdsCustInvoiceJour.addRange(fieldNum(CustInvoiceJour, InvoiceDate));\n        qbrDateRange.value(strFmt(\"%1..%2\",\n                                 date2StrXpp(today() - 365, 321),\n                                 date2StrXpp(today(), 321)));\n        \n        // Set company list - get from user parameters or security\n        query.allowCrossCompany(CrossCompanyQueryUtils::getAllowedCompanies());\n        \n        queryRun = new QueryRun(query);\n        \n        while (queryRun.next())\n        {\n            custTable = queryRun.getNo(1);\n            custInvoiceJour = queryRun.getNo(2);\n            \n            totalAmount += custInvoiceJour.InvoiceAmountMST;\n            \n            result += [custTable.AccountNum,\n                      custTable.dataAreaId,\n                      custInvoiceJour.InvoiceId,\n                      custInvoiceJour.InvoiceAmountMST,\n                      custInvoiceJour.CurrencyCode];\n        }\n        \n        info(strFmt(\"Cross-company analysis complete. Total amount: %1\",\n                   num2StrKeepDecimals(totalAmount, 2, 2, 1, 1)));\n        \n    }\n    catch (Exception::Error)\n    {\n        error(\"Cross-company query framework error: \" + infolog.text());\n        throw Exception::Error;\n    }\n    \n    return result;\n}"
+        },
+        {
+          "title": "changeCompany Pattern for Cross-Company Updates",
+          "description": "Demonstrates safe cross-company data updates using changeCompany with transaction management",
+          "language": "xpp",
+          "code": "static void UpdateCustomerCreditLimitAcrossCompanies(CustAccount _custAccount, \n                                                     AmountCur _newCreditLimit)\n{\n    CustTable           custTable;\n    CompanyInfo         companyInfo;\n    container           companiesUpdated;\n    str                 currentCompany;\n    int                 updatedCount;\n    \n    currentCompany = curext();\n    \n    try\n    {\n        ttsbegin;\n        \n        // Find companies where customer exists\n        while select DataArea from companyInfo\n            where companyInfo.DataArea != ''\n            exists join custTable\n                where custTable.AccountNum == _custAccount\n                   && custTable.dataAreaId == companyInfo.DataArea\n        {\n            // Security check before company change\n            if (!SecurityRights::hasTableAccess(tableNum(CustTable),\n                                               AccessType::Update,\n                                               companyInfo.DataArea))\n            {\n                warning(strFmt(\"No update access to CustTable in company %1\",\n                              companyInfo.DataArea));\n                continue;\n            }\n            \n            // Change company context for update\n            changeCompany(companyInfo.DataArea)\n            {\n                select forupdate custTable\n                    where custTable.AccountNum == _custAccount;\n                \n                if (custTable.RecId)\n                {\n                    // Validate business rules in target company\n                    if (custTable.validateWrite())\n                    {\n                        custTable.CreditMax = _newCreditLimit;\n                        custTable.update();\n                        \n                        companiesUpdated += companyInfo.DataArea;\n                        updatedCount++;\n                        \n                        info(strFmt(\"Updated credit limit for %1 in company %2: %3\",\n                                   _custAccount,\n                                   companyInfo.DataArea,\n                                   num2StrKeepDecimals(_newCreditLimit, 2, 2, 1, 1)));\n                    }\n                    else\n                    {\n                        warning(strFmt(\"Validation failed for %1 in company %2\",\n                                      _custAccount,\n                                      companyInfo.DataArea));\n                    }\n                }\n            }\n        }\n        \n        // Ensure we're back in original company context\n        changeCompany(currentCompany)\n        {\n            // Log the cross-company update\n            EventInbox::addMessage(EventInboxMessageType::Info,\n                                  \"Cross-company credit limit update\",\n                                  strFmt(\"Updated %1 companies for customer %2\",\n                                        updatedCount,\n                                        _custAccount));\n        }\n        \n        ttscommit;\n        \n        info(strFmt(\"Credit limit update completed across %1 companies\",\n                   updatedCount));\n    }\n    catch (Exception::UpdateConflict)\n    {\n        ttsabort;\n        error(\"Cross-company update failed due to concurrency conflict\");\n        throw Exception::UpdateConflict;\n    }\n    catch (Exception::Error)\n    {\n        ttsabort;\n        error(\"Cross-company update failed: \" + infolog.text());\n        throw Exception::Error;\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "crossCompany keyword enables querying across multiple legal entities in a single select statement — use container of company IDs to limit scope",
+        "changeCompany statement switches execution context to another legal entity — essential for cross-company updates and maintaining data integrity",
+        "Query framework's allowCrossCompany() method provides programmatic control over cross-company operations with better performance for complex scenarios",
+        "Security validation must be performed explicitly for each target company using SecurityRights::hasTableAccess() before accessing cross-company data",
+        "Performance degrades significantly with crossCompany queries as DataAreaId-based indexes cannot be used — consider caching and limiting result sets"
+      ],
+      "gotchas": [
+        "crossCompany queries ignore company-specific customizations and extensions — CoC and event handlers may not fire as expected in target companies",
+        "Transaction boundaries with changeCompany can cause deadlocks — always use consistent company ordering and minimize transaction scope across companies",
+        "RecordLevelSecurity policies are evaluated in current company context, not target company — manually validate RLS rules when crossing company boundaries"
+      ],
+      "performance_tips": [
+        "Use specific company containers instead of querying all companies — CrossCompanyQueryUtils.getAllowedCompanies() respects user security but may return too many companies",
+        "Consider using SysOperation framework for long-running cross-company operations to avoid timeout issues and provide progress feedback to users"
+      ],
+      "related_topics": [
+        "xpp_security",
+        "xpp_batch",
+        "xpp_select"
+      ],
+      "quiz": [
+        {
+          "q": "Which method is most efficient for updating the same record across multiple companies?",
+          "options": [
+            "Multiple crossCompany select statements in a loop",
+            "Single changeCompany statement with company loop",
+            "Query framework with allowCrossCompany(true)",
+            "Separate batch jobs per company"
+          ],
+          "answer": 1,
+          "explanation": "changeCompany with a company loop is most efficient because it maintains proper transaction context, allows index usage within each company, and provides better error handling granularity compared to crossCompany select which cannot be used for updates."
+        },
+        {
+          "q": "What happens to RecordLevelSecurity when using crossCompany queries?",
+          "options": [
+            "RLS policies are applied in each target company automatically",
+            "RLS is evaluated in the current company context only",
+            "RLS is completely bypassed for crossCompany operations",
+            "RLS policies must be manually specified in the query"
+          ],
+          "answer": 1,
+          "explanation": "RecordLevelSecurity policies are evaluated in the current company context only when using crossCompany queries. This means developers must manually validate security rules for each target company to ensure proper data access control."
+        },
+        {
+          "q": "Why do crossCompany queries typically have poor performance compared to single-company queries?",
+          "options": [
+            "Network latency between companies",
+            "Additional security validation overhead",
+            "Cannot use indexes that include DataAreaId",
+            "Must load all company metadata first"
+          ],
+          "answer": 2,
+          "explanation": "crossCompany queries cannot use indexes that include DataAreaId as a key field, which forces table scans instead of efficient index seeks. Since most D365 tables include DataAreaId in their primary indexes, this significantly impacts query performance."
+        }
+      ]
+    },
+    "generated_date": "2026-03-11",
+    "auto_generated": true
   }
 ]

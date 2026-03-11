@@ -1,5 +1,13 @@
 [
   {
+    "date": "Mar 11",
+    "tag": "LESSON",
+    "title": "Cross-Company Queries in X++",
+    "section": "X++ Language",
+    "level": "Expert",
+    "id": "xpp_crosscompany"
+  },
+  {
     "date": "Mar 10",
     "tag": "LESSON",
     "title": "Delegates & Event-Driven X++",

@@ -1,5 +1,5 @@
 {
-  "last_index": 1,
+  "last_index": 2,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -14,9 +14,10 @@
     "ai_intro",
     "ai_mcp",
     "xpp_display_methods",
-    "xpp_delegates"
+    "xpp_delegates",
+    "xpp_crosscompany"
   ],
-  "last_run": "2026-03-10",
-  "last_title": "Delegates & Event-Driven X++",
+  "last_run": "2026-03-11",
+  "last_title": "Cross-Company Queries in X++",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

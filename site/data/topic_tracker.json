@@ -1,5 +1,5 @@
 {
-  "last_index": 3,
+  "last_index": 4,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -16,9 +16,10 @@
     "xpp_display_methods",
     "xpp_delegates",
     "xpp_crosscompany",
-    "xpp_containers"
+    "xpp_containers",
+    "xpp_reflection"
   ],
-  "last_run": "2026-03-12",
-  "last_title": "Containers: Pack, Unpack & Serialize",
+  "last_run": "2026-03-13",
+  "last_title": "Reflection: DictTable, DictField APIs",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

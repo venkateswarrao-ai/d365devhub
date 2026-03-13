@@ -1,5 +1,13 @@
 [
   {
+    "date": "Mar 13",
+    "tag": "LESSON",
+    "title": "Reflection: DictTable, DictField APIs",
+    "section": "X++ Language",
+    "level": "Expert",
+    "id": "xpp_reflection"
+  },
+  {
     "date": "Mar 12",
     "tag": "LESSON",
     "title": "Containers: Pack, Unpack & Serialize",

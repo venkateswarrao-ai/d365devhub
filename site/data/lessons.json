@@ -568,5 +568,102 @@
     },
     "generated_date": "2026-03-12",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_reflection",
+    "title": "Reflection: DictTable, DictField APIs",
+    "section": "X++ Language",
+    "level": "Expert",
+    "duration": "12 min read",
+    "tags": [
+      "reflection",
+      "metadata",
+      "dicttable",
+      "dictfield",
+      "runtime-introspection"
+    ],
+    "summary": "Master D365 F&O's reflection capabilities using DictTable and DictField APIs for runtime metadata introspection, dynamic form generation, and advanced integration scenarios.",
+    "content": {
+      "overview": "D365 F&O's reflection system provides powerful runtime introspection capabilities through the DictTable and DictField APIs, enabling developers to programmatically access table and field metadata without compile-time dependencies. This is essential for building generic frameworks, data migration tools, integration adapters, and dynamic UI components that must adapt to varying AOT structures across environments. Unlike .NET reflection, D365's reflection operates on AOT metadata cached in the application dictionary, making it extremely fast for metadata queries but limited to design-time structure information. Understanding these APIs is crucial for enterprise-level customizations that require flexibility and maintainability across multiple D365 installations with varying customizations.",
+      "theory": "The reflection system in D365 F&O is built around the Dictionary classes hierarchy, with DictTable and DictField being the primary entry points for table and field metadata respectively. These classes provide access to the compiled AOT metadata stored in the UtilElements and related system tables, offering information about field types, labels, extended data types, relations, and validation rules. The DictTable class extends TreeNode and provides methods like fieldCnt(), fieldObject(), and relation() to traverse table structure, while DictField encapsulates field-specific metadata including baseType(), extendedDataType(), and label(). The reflection system integrates deeply with the SysTableBrowser framework, FormDataSource mechanics, and the broader metadata-driven architecture that powers features like personalization, data entities, and OData endpoints. Performance is optimized through aggressive caching of dictionary objects, but developers must understand the lifecycle implications and memory overhead of retaining references to these objects.",
+      "code_examples": [
+        {
+          "title": "Basic Table and Field Metadata Inspection",
+          "description": "Demonstrates how to iterate through table fields and extract comprehensive metadata including EDT information, labels, and field properties",
+          "language": "xpp",
+          "code": "static void inspectTableMetadata(Args _args)\n{\n    DictTable       dictTable;\n    DictField       dictField;\n    DictEnum        dictEnum;\n    int             fieldId;\n    str             fieldInfo;\n    \n    dictTable = new DictTable(tableNum(CustTable));\n    \n    info(strFmt(\"Table: %1 (%2)\", dictTable.name(), dictTable.label()));\n    info(strFmt(\"Field Count: %1\", dictTable.fieldCnt()));\n    \n    // Iterate through all fields including system fields\n    for (fieldId = dictTable.fieldNext(0); fieldId; fieldId = dictTable.fieldNext(fieldId))\n    {\n        dictField = dictTable.fieldObject(fieldId);\n        \n        fieldInfo = strFmt(\"Field: %1 | Type: %2 | EDT: %3 | Label: %4\",\n                          dictField.name(),\n                          enum2Str(dictField.baseType()),\n                          dictField.extendedDataType() ? extendedTypeId2name(dictField.extendedDataType()) : 'N/A',\n                          dictField.label());\n        \n        // Additional metadata for enum fields\n        if (dictField.baseType() == Types::Enum)\n        {\n            dictEnum = new DictEnum(dictField.enumId());\n            fieldInfo += strFmt(\" | Enum: %1\", dictEnum.name());\n        }\n        \n        // Check for mandatory and system fields\n        if (dictField.mandatory())\n            fieldInfo += \" | MANDATORY\";\n        if (dictField.isSystem())\n            fieldInfo += \" | SYSTEM\";\n            \n        info(fieldInfo);\n    }\n}"
+        },
+        {
+          "title": "Dynamic Record Creation with Validation",
+          "description": "Advanced example showing how to use reflection for dynamic record creation with proper field validation and error handling",
+          "language": "xpp",
+          "code": "class DynamicRecordBuilder\n{\n    public static boolean createRecordFromMap(TableId _tableId, Map _fieldValueMap)\n    {\n        DictTable           dictTable;\n        DictField           dictField;\n        Common              record;\n        MapEnumerator       mapEnum;\n        FieldId             fieldId;\n        str                 fieldName;\n        anytype             fieldValue;\n        boolean             success = false;\n        \n        try\n        {\n            dictTable = new DictTable(_tableId);\n            record = dictTable.makeRecord();\n            \n            if (!record)\n            {\n                throw error(strFmt(\"Cannot create record for table %1\", dictTable.name()));\n            }\n            \n            ttsbegin;\n            \n            mapEnum = _fieldValueMap.getEnumerator();\n            while (mapEnum.moveNext())\n            {\n                fieldName = mapEnum.currentKey();\n                fieldValue = mapEnum.currentValue();\n                \n                // Find field by name\n                fieldId = dictTable.fieldName2Id(fieldName);\n                if (!fieldId)\n                {\n                    warning(strFmt(\"Field %1 not found in table %2\", fieldName, dictTable.name()));\n                    continue;\n                }\n                \n                dictField = dictTable.fieldObject(fieldId);\n                \n                // Validate field is not system field and can be set\n                if (dictField.isSystem())\n                {\n                    info(strFmt(\"Skipping system field %1\", fieldName));\n                    continue;\n                }\n                \n                // Type-safe value assignment based on field type\n                switch (dictField.baseType())\n                {\n                    case Types::String:\n                    case Types::VarString:\n                        if (strlen(fieldValue) > dictField.stringLen())\n                        {\n                            warning(strFmt(\"Value truncated for field %1: max length %2\", \n                                          fieldName, dictField.stringLen()));\n                            fieldValue = substr(fieldValue, 1, dictField.stringLen());\n                        }\n                        record.(fieldId) = fieldValue;\n                        break;\n                        \n                    case Types::Integer:\n                        record.(fieldId) = str2Int(any2Str(fieldValue));\n                        break;\n                        \n                    case Types::Real:\n                        record.(fieldId) = str2Num(any2Str(fieldValue));\n                        break;\n                        \n                    case Types::Date:\n                        record.(fieldId) = str2Date(any2Str(fieldValue), 123);\n                        break;\n                        \n                    case Types::Enum:\n                        record.(fieldId) = str2Enum(dictField.enumId(), any2Str(fieldValue));\n                        break;\n                        \n                    default:\n                        record.(fieldId) = fieldValue;\n                        break;\n                }\n            }\n            \n            // Validate record before insert\n            if (record.validateWrite())\n            {\n                record.insert();\n                success = true;\n                info(strFmt(\"Record created successfully in table %1 with RecId %2\", \n                           dictTable.name(), record.RecId));\n            }\n            else\n            {\n                throw error(\"Record validation failed\");\n            }\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            error(\"Failed to create record: \" + infolog.text());\n            success = false;\n        }\n        \n        return success;\n    }\n}"
+        },
+        {
+          "title": "Advanced Metadata Analysis for Integration Mapping",
+          "description": "Enterprise-grade example demonstrating how to build field mapping metadata for external system integration, including relation traversal and EDT hierarchy analysis",
+          "language": "xpp",
+          "code": "class MetadataAnalyzer\n{\n    public static container buildFieldMappingMetadata(TableId _tableId)\n    {\n        DictTable           dictTable;\n        DictField           dictField;\n        DictRelation        dictRelation;\n        DictType            dictType;\n        container           mappingData = conNull();\n        container           fieldMetadata;\n        int                 fieldId, relationIdx;\n        str                 edtName, parentEDT;\n        \n        dictTable = new DictTable(_tableId);\n        \n        // Build comprehensive field mapping metadata\n        for (fieldId = dictTable.fieldNext(0); fieldId; fieldId = dictTable.fieldNext(fieldId))\n        {\n            dictField = dictTable.fieldObject(fieldId);\n            \n            // Skip system fields for integration scenarios\n            if (dictField.isSystem())\n                continue;\n                \n            fieldMetadata = conNull();\n            fieldMetadata = conIns(fieldMetadata, 1, dictField.name());\n            fieldMetadata = conIns(fieldMetadata, 2, dictField.label());\n            fieldMetadata = conIns(fieldMetadata, 3, enum2Str(dictField.baseType()));\n            fieldMetadata = conIns(fieldMetadata, 4, dictField.mandatory());\n            \n            // Extended Data Type analysis\n            if (dictField.extendedDataType())\n            {\n                edtName = extendedTypeId2name(dictField.extendedDataType());\n                dictType = new DictType(dictField.extendedDataType());\n                parentEDT = dictType.extends() ? extendedTypeId2name(dictType.extends()) : '';\n                \n                fieldMetadata = conIns(fieldMetadata, 5, edtName);\n                fieldMetadata = conIns(fieldMetadata, 6, parentEDT);\n                fieldMetadata = conIns(fieldMetadata, 7, dictType.stringLen());\n                fieldMetadata = conIns(fieldMetadata, 8, dictType.helpText());\n            }\n            else\n            {\n                fieldMetadata = conIns(fieldMetadata, 5, '');\n                fieldMetadata = conIns(fieldMetadata, 6, '');\n                fieldMetadata = conIns(fieldMetadata, 7, dictField.stringLen());\n                fieldMetadata = conIns(fieldMetadata, 8, '');\n            }\n            \n            // Analyze table relations for foreign key mapping\n            container relationInfo = conNull();\n            for (relationIdx = 1; relationIdx <= dictTable.relationCnt(); relationIdx++)\n            {\n                dictRelation = dictTable.relationObject(relationIdx);\n                \n                // Check if current field participates in this relation\n                if (MetadataAnalyzer::fieldInRelation(dictRelation, fieldId))\n                {\n                    DictTable relatedTable = new DictTable(dictRelation.table());\n                    relationInfo = conIns(relationInfo, conLen(relationInfo) + 1, \n                                         strFmt(\"%1.%2\", relatedTable.name(), \n                                               dictRelation.externTable() ? 'Multiple' : 'Single'));\n                }\n            }\n            fieldMetadata = conIns(fieldMetadata, 9, relationInfo);\n            \n            mappingData = conIns(mappingData, conLen(mappingData) + 1, fieldMetadata);\n        }\n        \n        return mappingData;\n    }\n    \n    private static boolean fieldInRelation(DictRelation _dictRelation, FieldId _fieldId)\n    {\n        int lineIdx;\n        DictRelationLine dictRelationLine;\n        \n        for (lineIdx = 1; lineIdx <= _dictRelation.lines(); lineIdx++)\n        {\n            dictRelationLine = new DictRelationLine(_dictRelation.childName(), lineIdx);\n            if (dictRelationLine.sourceField() == _fieldId)\n                return true;\n        }\n        \n        return false;\n    }\n    \n    public static void exportTableMetadataToXML(TableId _tableId, str _filePath)\n    {\n        container       mappingData;\n        container       fieldData;\n        int             i;\n        System.Xml.XmlDocument xmlDoc = new System.Xml.XmlDocument();\n        System.Xml.XmlElement rootElement, tableElement, fieldElement;\n        DictTable       dictTable = new DictTable(_tableId);\n        \n        try\n        {\n            mappingData = MetadataAnalyzer::buildFieldMappingMetadata(_tableId);\n            \n            rootElement = xmlDoc.CreateElement('TableMetadata');\n            xmlDoc.AppendChild(rootElement);\n            \n            tableElement = xmlDoc.CreateElement('Table');\n            tableElement.SetAttribute('Name', dictTable.name());\n            tableElement.SetAttribute('Label', dictTable.label());\n            tableElement.SetAttribute('TableId', int2Str(_tableId));\n            rootElement.AppendChild(tableElement);\n            \n            for (i = 1; i <= conLen(mappingData); i++)\n            {\n                fieldData = conPeek(mappingData, i);\n                fieldElement = xmlDoc.CreateElement('Field');\n                fieldElement.SetAttribute('Name', conPeek(fieldData, 1));\n                fieldElement.SetAttribute('Label', conPeek(fieldData, 2));\n                fieldElement.SetAttribute('Type', conPeek(fieldData, 3));\n                fieldElement.SetAttribute('Mandatory', boolean2Str(conPeek(fieldData, 4)));\n                fieldElement.SetAttribute('EDT', conPeek(fieldData, 5));\n                fieldElement.SetAttribute('ParentEDT', conPeek(fieldData, 6));\n                fieldElement.SetAttribute('StringLen', int2Str(conPeek(fieldData, 7)));\n                \n                tableElement.AppendChild(fieldElement);\n            }\n            \n            xmlDoc.Save(_filePath);\n            info(strFmt(\"Metadata exported to %1\", _filePath));\n        }\n        catch (Exception::CLRError)\n        {\n            error(\"CLR Error during XML export: \" + CLRInterop::getLastException().ToString());\n        }\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "DictTable.makeRecord() creates properly initialized records with default values and field inheritance from EDT configurations — essential for programmatic record creation",
+        "Field iteration using fieldNext() is more efficient than fieldCnt() loops because it skips deleted field IDs and respects field inheritance hierarchy",
+        "DictField.isSystem() and DictField.mandatory() provide critical validation metadata for dynamic form generation and data import scenarios",
+        "Extended Data Type traversal through DictType.extends() enables building comprehensive field validation rules and UI hint systems",
+        "Table relations accessed via DictRelation provide foreign key metadata essential for building referential integrity in integration scenarios"
+      ],
+      "gotchas": [
+        "Caching DictTable and DictField objects can cause memory leaks in long-running processes — always scope these objects appropriately and avoid static references",
+        "fieldName2Id() is case-sensitive and will return 0 for non-existent fields, but won't throw exceptions — always validate return values before using field IDs",
+        "DictField.stringLen() returns the AOT-defined length, not the database column length, which can differ when using UTF-8 encoding — validate against actual database constraints in production"
+      ],
+      "performance_tips": [
+        "Pre-cache frequently accessed DictTable objects in class member variables rather than recreating them in loops — dictionary object creation involves AOT metadata lookup",
+        "Use fieldObject() sparingly in tight loops — consider caching field metadata in containers or maps for batch processing scenarios"
+      ],
+      "related_topics": [
+        "xpp_containers",
+        "xpp_types",
+        "xpp_tables"
+      ],
+      "quiz": [
+        {
+          "q": "What is the most efficient way to iterate through all non-system fields of a table using reflection APIs?",
+          "options": [
+            "Use fieldCnt() and iterate from 1 to count",
+            "Use fieldNext() starting from 0 and check isSystem()",
+            "Use fieldObject() with sequential field IDs",
+            "Query the UtilElements table directly"
+          ],
+          "answer": 1,
+          "explanation": "fieldNext() is the proper iterator method that automatically skips deleted field IDs and respects the field hierarchy. Checking isSystem() allows filtering out system fields efficiently during iteration."
+        },
+        {
+          "q": "When using DictField.extendedDataType() to get EDT information, what should you check before using the returned value?",
+          "options": [
+            "Check if the field is mandatory",
+            "Check if the return value is not 0",
+            "Check if the field is a system field",
+            "Check the field's base type"
+          ],
+          "answer": 1,
+          "explanation": "extendedDataType() returns 0 for fields that don't have an associated EDT (like primitive types). Always validate the return value before passing it to extendedTypeId2name() or creating DictType objects to avoid runtime errors."
+        },
+        {
+          "q": "What is the primary limitation of D365 F&O's reflection system compared to .NET reflection?",
+          "options": [
+            "It cannot access private methods",
+            "It only provides compile-time metadata, not runtime state",
+            "It cannot create object instances",
+            "It doesn't support generic types"
+          ],
+          "answer": 1,
+          "explanation": "D365 F&O reflection operates on AOT metadata cached at application startup, providing design-time structure information but not runtime state or dynamic type creation capabilities like .NET reflection."
+        }
+      ]
+    },
+    "generated_date": "2026-03-13",
+    "auto_generated": true
   }
 ]

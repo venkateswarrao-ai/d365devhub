@@ -1,5 +1,13 @@
 [
   {
+    "date": "Mar 15",
+    "tag": "LESSON",
+    "title": "SysOperation Framework Deep Dive",
+    "section": "X++ Language",
+    "level": "Expert",
+    "id": "xpp_sysoperation"
+  },
+  {
     "date": "Mar 14",
     "tag": "LESSON",
     "title": "RunBase & RunBaseBatch Framework",

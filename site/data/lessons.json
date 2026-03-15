@@ -756,5 +756,102 @@
     },
     "generated_date": "2026-03-14",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_sysoperation",
+    "title": "SysOperation Framework Deep Dive",
+    "section": "X++ Language",
+    "level": "Expert",
+    "duration": "18 min read",
+    "tags": [
+      "sysoperation",
+      "framework",
+      "batch",
+      "dialog",
+      "services"
+    ],
+    "summary": "Master the SysOperation framework for building scalable, enterprise-grade batch operations and service endpoints in D365 F&O.",
+    "content": {
+      "overview": "The SysOperation framework is D365 F&O's modern replacement for the legacy RunBase framework, providing a robust architecture for building batch operations, dialogs, and service endpoints. Unlike RunBase, SysOperation enforces clean separation of concerns through distinct classes: DataContract (parameters), Controller (orchestration), and Service (business logic). This framework powers critical D365 operations like posting routines, data imports, and integration services.\n\nThe framework's strength lies in its automatic serialization, client-server boundary handling, and seamless integration with the batch framework. It eliminates the boilerplate code required in RunBase while providing better testability, maintainability, and scalability. The framework automatically handles parameter validation, UI generation, and cross-tier communication, making it essential for enterprise-grade customizations.\n\nSysOperation is particularly valuable when building operations that need to run in batch, require complex parameter sets, or serve as integration endpoints. Understanding its internal mechanics—especially the SysOperationServiceController lifecycle and data contract binding—is crucial for senior developers working on performance-critical or high-volume operations.",
+      "theory": "The SysOperation framework implements a Service-Oriented Architecture (SOA) pattern with three core components. The SysOperationDataContractBase provides parameter encapsulation with automatic serialization using DataContractAttribute and DataMemberAttribute decorations. The SysOperationServiceController orchestrates execution flow, handling UI generation, parameter validation, and batch scheduling. The service class contains the business logic, decorated with SysEntryPointAttribute for security validation.\n\nInternally, the framework leverages reflection extensively. The SysOperationServiceController.generateDialog() method uses SysOperationDataContractProcessorAttribute to build UI dialogs dynamically from data contract properties. The SysOperationDataContractProcessor class hierarchy (Base, Default, UIBuilder) transforms data contract metadata into DialogField objects. This reflection-based approach enables automatic UI generation but has performance implications that must be considered.\n\nThe framework integrates deeply with D365's batch infrastructure through BatchScheduler and SysOperationExecutionContext. When executed in batch mode, parameters are serialized using FormJsonSerializer, stored in BatchConstraintsHistory, and deserialized on the AOS during execution. The SysOperationProgress class provides standardized progress reporting, while SysOperationServiceController.run() manages the complete execution lifecycle including pre/post-processing hooks and exception handling.",
+      "code_examples": [
+        {
+          "title": "Complete SysOperation Implementation - Customer Credit Limit Update",
+          "description": "A production-ready SysOperation that demonstrates all framework components: data contract with validation, service with business logic, and proper error handling",
+          "language": "xpp",
+          "code": "// Data Contract Class\n[DataContractAttribute,\n SysOperationGroupAttribute('CustCreditLimit', 'Customer credit limit parameters', true),\n SysOperationContractProcessingAttribute(classStr(CustCreditLimitDataContractProcessor))]\nfinal class CustCreditLimitDataContract extends SysOperationDataContractBase\n{\n    private CustGroupId     custGroup;\n    private AmountCur       creditLimitAmount;\n    private boolean         validateExisting;\n    \n    [DataMemberAttribute('CustGroup'),\n     SysOperationLabelAttribute(literalStr('@SYS12345')),\n     SysOperationHelpTextAttribute(literalStr('@SYS12346')),\n     SysOperationDisplayOrderAttribute('1')]\n    public CustGroupId parmCustGroup(CustGroupId _custGroup = custGroup)\n    {\n        custGroup = _custGroup;\n        return custGroup;\n    }\n    \n    [DataMemberAttribute('CreditLimitAmount'),\n     SysOperationLabelAttribute(literalStr('Credit limit amount')),\n     SysOperationDisplayOrderAttribute('2')]\n    public AmountCur parmCreditLimitAmount(AmountCur _creditLimitAmount = creditLimitAmount)\n    {\n        creditLimitAmount = _creditLimitAmount;\n        return creditLimitAmount;\n    }\n    \n    [DataMemberAttribute('ValidateExisting'),\n     SysOperationLabelAttribute(literalStr('Validate existing limits')),\n     SysOperationDisplayOrderAttribute('3')]\n    public boolean parmValidateExisting(boolean _validateExisting = validateExisting)\n    {\n        validateExisting = _validateExisting;\n        return validateExisting;\n    }\n    \n    public boolean validate()\n    {\n        boolean ret = super();\n        \n        if (!custGroup)\n        {\n            ret = checkFailed(strFmt('@SYS12347', fieldPName(CustGroup, CustGroupId)));\n        }\n        \n        if (creditLimitAmount <= 0)\n        {\n            ret = checkFailed('Credit limit amount must be greater than zero');\n        }\n        \n        return ret;\n    }\n}\n\n// Service Class\nclass CustCreditLimitService extends SysOperationServiceBase\n{\n    [SysEntryPointAttribute(false),\n     SysOperationServiceOperationAttribute('updateCreditLimits', 'Update customer credit limits')]\n    public void updateCreditLimits(CustCreditLimitDataContract _dataContract)\n    {\n        CustTable           custTable;\n        CustGroupId         custGroup = _dataContract.parmCustGroup();\n        AmountCur          newLimit = _dataContract.parmCreditLimitAmount();\n        boolean            validate = _dataContract.parmValidateExisting();\n        int                recordsProcessed = 0;\n        SysOperationProgress progress = new SysOperationProgress();\n        \n        try\n        {\n            ttsbegin;\n            \n            // Initialize progress\n            select count(RecId) from custTable\n                where custTable.CustGroup == custGroup;\n            \n            progress.setTotal(custTable.RecId, 'Updating customer credit limits');\n            \n            while select forupdate custTable\n                where custTable.CustGroup == custGroup\n            {\n                progress.incCount();\n                \n                if (validate && custTable.CreditMax > 0 && custTable.CreditMax > newLimit)\n                {\n                    warning(strFmt('Customer %1 has existing limit %2 higher than new limit %3',\n                                   custTable.AccountNum, custTable.CreditMax, newLimit));\n                    continue;\n                }\n                \n                custTable.CreditMax = newLimit;\n                custTable.update();\n                recordsProcessed++;\n                \n                // Commit every 100 records for better performance\n                if (recordsProcessed % 100 == 0)\n                {\n                    ttscommit;\n                    ttsbegin;\n                }\n            }\n            \n            ttscommit;\n            \n            info(strFmt('Successfully updated credit limits for %1 customers in group %2',\n                       recordsProcessed, custGroup));\n        }\n        catch (Exception::Error)\n        {\n            error('An error occurred while updating customer credit limits');\n            throw;\n        }\n    }\n}"
+        },
+        {
+          "title": "Advanced Controller with Custom Dialog and Batch Handling",
+          "description": "Custom controller implementation with sophisticated dialog customization, batch scheduling, and progress tracking",
+          "language": "xpp",
+          "code": "// Controller Class\nclass CustCreditLimitController extends SysOperationServiceController\n{\n    protected void new()\n    {\n        super(classStr(CustCreditLimitService), methodStr(CustCreditLimitService, updateCreditLimits));\n        this.parmClassName(classStr(CustCreditLimitService));\n        this.parmMethodName(methodStr(CustCreditLimitService, updateCreditLimits));\n        this.parmDialogCaption('Update customer credit limits');\n    }\n    \n    public static CustCreditLimitController construct()\n    {\n        return new CustCreditLimitController();\n    }\n    \n    public static void main(Args _args)\n    {\n        CustCreditLimitController   controller;\n        CustCreditLimitDataContract dataContract;\n        \n        controller = CustCreditLimitController::construct();\n        \n        // Pre-populate from caller context if available\n        if (_args && _args.record())\n        {\n            CustGroup custGroup = _args.record();\n            if (custGroup.RecId)\n            {\n                dataContract = controller.getDataContractObject();\n                dataContract.parmCustGroup(custGroup.CustGroup);\n            }\n        }\n        \n        if (controller.prompt())\n        {\n            controller.runOperation();\n        }\n    }\n    \n    protected void prePromptModifyContract()\n    {\n        super();\n        \n        CustCreditLimitDataContract dataContract = this.getDataContractObject();\n        \n        // Set intelligent defaults\n        if (!dataContract.parmCreditLimitAmount())\n        {\n            dataContract.parmCreditLimitAmount(10000.00);\n        }\n        \n        dataContract.parmValidateExisting(true);\n    }\n    \n    public ClassDescription caption()\n    {\n        return 'Update customer credit limits';\n    }\n    \n    protected boolean canGoBatch()\n    {\n        return true;\n    }\n    \n    protected boolean canRunInNewSession()\n    {\n        return false; // Prevent issues with transaction scope\n    }\n    \n    protected void preRun()\n    {\n        super();\n        \n        CustCreditLimitDataContract dataContract = this.getDataContractObject();\n        \n        // Additional validation before execution\n        CustGroup custGroup;\n        select firstonly custGroup\n            where custGroup.CustGroup == dataContract.parmCustGroup();\n            \n        if (!custGroup.RecId)\n        {\n            throw error(strFmt('Customer group %1 does not exist', dataContract.parmCustGroup()));\n        }\n    }\n    \n    protected void postRun()\n    {\n        super();\n        \n        // Custom post-processing logic\n        if (this.isInBatch())\n        {\n            // Send notification email or create alerts\n            info('Credit limit update operation completed successfully');\n        }\n    }\n}"
+        },
+        {
+          "title": "Custom Data Contract Processor for Advanced UI Control",
+          "description": "Advanced data contract processor that demonstrates custom dialog field creation, dynamic lookups, and field dependencies",
+          "language": "xpp",
+          "code": "// Custom Data Contract Processor\nclass CustCreditLimitDataContractProcessor extends SysOperationDataContractProcessorDefault\n{\n    DialogField         custGroupField;\n    DialogField         creditLimitField;\n    DialogField         validateField;\n    \n    protected Object buildDialogForContract()\n    {\n        Dialog dialog = super();\n        \n        // Get the data contract\n        CustCreditLimitDataContract dataContract = this.getDataContractObject();\n        \n        // Customize the customer group field with lookup\n        custGroupField = dialog.addFieldValue(extendedTypeStr(CustGroupId), dataContract.parmCustGroup());\n        custGroupField.label('Customer group');\n        custGroupField.lookupButton(2); // Enable lookup\n        custGroupField.registerOverrideMethod(methodStr(FormStringControl, lookup),\n                                              methodStr(CustCreditLimitDataContractProcessor, custGroupLookup),\n                                              this);\n        \n        // Credit limit field with validation\n        creditLimitField = dialog.addFieldValue(extendedTypeStr(AmountCur), dataContract.parmCreditLimitAmount());\n        creditLimitField.label('New credit limit');\n        creditLimitField.mandatory(true);\n        \n        // Validation checkbox\n        validateField = dialog.addFieldValue(extendedTypeStr(NoYesId), dataContract.parmValidateExisting());\n        validateField.label('Validate existing limits');\n        validateField.helpText('When enabled, customers with higher existing limits will be skipped');\n        \n        return dialog;\n    }\n    \n    protected void processDataMemberForDialog(SysOperationDataMemberInfo _dataMemberInfo, Dialog _dialog, DialogField _dialogField)\n    {\n        super(_dataMemberInfo, _dialog, _dialogField);\n        \n        // Additional customization based on data member\n        switch (_dataMemberInfo.getDataMemberName())\n        {\n            case 'CreditLimitAmount':\n                _dialogField.formatValue(FormControlFormat::Currency);\n                break;\n                \n            case 'CustGroup':\n                _dialogField.backgroundColor(WinAPI::RGB(240, 248, 255)); // Light blue\n                break;\n        }\n    }\n    \n    public void custGroupLookup(FormStringControl _formStringControl)\n    {\n        SysTableLookup      lookup;\n        Query               query;\n        QueryBuildDataSource qbds;\n        \n        lookup = SysTableLookup::newParameters(tableNum(CustGroup), _formStringControl);\n        lookup.addLookupfield(fieldNum(CustGroup, CustGroup));\n        lookup.addLookupfield(fieldNum(CustGroup, Name));\n        \n        // Create query for active customer groups only\n        query = new Query();\n        qbds = query.addDataSource(tableNum(CustGroup));\n        qbds.addRange(fieldNum(CustGroup, Blocked)).value(queryValue(NoYes::No));\n        \n        lookup.parmQuery(query);\n        lookup.performFormLookup();\n    }\n    \n    protected boolean validateDataContract(Object _dataContract)\n    {\n        boolean ret = super(_dataContract);\n        \n        CustCreditLimitDataContract dataContract = _dataContract as CustCreditLimitDataContract;\n        \n        if (dataContract)\n        {\n            // Custom validation logic\n            if (dataContract.parmCreditLimitAmount() > 1000000)\n            {\n                if (!Box::yesNo('Credit limit exceeds $1,000,000. Continue?', DialogButton::No))\n                {\n                    ret = false;\n                }\n            }\n        }\n        \n        return ret;\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "SysOperation enforces separation of concerns through DataContract (parameters), Controller (orchestration), and Service (business logic) — never mix these responsibilities",
+        "Use SysOperationDataContractProcessorAttribute to create custom UI processors for complex dialog requirements beyond basic field decoration",
+        "Implement proper batch handling with canGoBatch() returning true and use SysOperationProgress for user feedback in long-running operations",
+        "DataContract validation occurs at multiple levels: property setters, validate() method, and custom processor validateDataContract() — leverage all three appropriately",
+        "SysEntryPointAttribute(false) on service methods is critical for security — it ensures proper authorization checks are performed during execution"
+      ],
+      "gotchas": [
+        "Data contract properties MUST have DataMemberAttribute for serialization to work — missing attributes cause silent parameter loss in batch execution, leading to operations running with default values",
+        "Never perform database operations in data contract constructors or property setters — this causes performance issues during dialog generation and can fail in batch mode due to connection context differences",
+        "SysOperation controllers instantiated with new() instead of construct() bypass proper initialization — always use static construct() methods to ensure proper service binding and metadata loading"
+      ],
+      "performance_tips": [
+        "Minimize reflection-heavy operations in prePromptModifyContract() and data contract processors — cache lookup data and avoid repeated metadata queries that impact dialog responsiveness",
+        "Use ttsbegin/ttscommit batching in service methods for bulk operations — commit every 100-1000 records to balance transaction log growth with rollback granularity"
+      ],
+      "related_topics": [
+        "xpp_batch",
+        "xpp_runbase",
+        "xpp_reflection"
+      ],
+      "quiz": [
+        {
+          "q": "What is the primary architectural advantage of SysOperation over RunBase framework?",
+          "options": [
+            "Better performance through compiled queries",
+            "Enforced separation of concerns with distinct classes for parameters, control, and logic",
+            "Automatic transaction management",
+            "Built-in multi-threading support"
+          ],
+          "answer": 1,
+          "explanation": "SysOperation's key advantage is enforced separation of concerns through DataContract (parameters), Controller (orchestration), and Service (business logic) classes. This separation improves testability, maintainability, and enables better code reuse compared to RunBase's monolithic approach."
+        },
+        {
+          "q": "When does SysOperation framework serialize data contract parameters?",
+          "options": [
+            "During batch execution and client-server boundary crossings",
+            "Only when storing to database",
+            "Every time a property is accessed",
+            "Only during dialog generation"
+          ],
+          "answer": 0,
+          "explanation": "SysOperation serializes data contract parameters during batch execution (to store in BatchConstraintsHistory) and when crossing client-server boundaries. This automatic serialization requires proper DataMemberAttribute decoration on all parameters that need persistence."
+        },
+        {
+          "q": "What happens if a data contract property lacks the DataMemberAttribute decoration?",
+          "options": [
+            "Compilation error occurs",
+            "Runtime exception is thrown",
+            "Property value is lost during serialization/batch execution",
+            "Property becomes read-only"
+          ],
+          "answer": 2,
+          "explanation": "Properties without DataMemberAttribute are excluded from serialization, causing their values to be lost during batch execution or client-server communication. This is a silent failure that can cause operations to run with default/null values instead of user-specified parameters."
+        }
+      ]
+    },
+    "generated_date": "2026-03-15",
+    "auto_generated": true
   }
 ]

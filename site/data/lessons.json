@@ -853,5 +853,97 @@
     },
     "generated_date": "2026-03-15",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_dialogs",
+    "title": "Dialogs: Dialog, DialogField, Lookups",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "25 min read",
+    "tags": [
+      "dialogs",
+      "user-interface",
+      "dialogfield",
+      "lookups",
+      "user-input"
+    ],
+    "summary": "Master the Dialog framework for creating dynamic user input forms with custom fields, validations, and lookups in D365 F&O.",
+    "content": {
+      "overview": "The Dialog framework in D365 F&O provides a powerful mechanism for creating runtime user input forms without requiring AOT form objects. Unlike static forms, Dialog objects can be constructed dynamically, making them ideal for batch jobs, reports, and utility functions that need user parameters. The framework consists of Dialog (container), DialogField (individual controls), and DialogRunbase (integration with RunBase pattern) classes that work together to create professional user interfaces.\n\nDialogs are particularly valuable when you need conditional field visibility, complex validation logic, or when integrating with the SysOperation framework. They're commonly used in report parameter dialogs, data import wizards, and maintenance utilities where the UI requirements are too dynamic for static forms but too complex for simple input dialogs.",
+      "theory": "The Dialog framework is built around the Dialog class (kernel class) which acts as a container for DialogField objects. Each DialogField represents a specific control type (string, integer, enum, lookup, etc.) and maintains its own state, validation, and events. The framework integrates deeply with the metadata system, automatically handling field properties like mandatory flags, extended data types, and help text.\n\nInternally, Dialog uses the DialogForm class to render the actual form at runtime. The form is created dynamically using FormRun and FormBuildControl objects, which explains why dialogs have the same look and feel as AOT forms. The DialogField hierarchy includes specialized classes like DialogFieldString, DialogFieldInt, DialogFieldEnum, and DialogFieldLookup, each optimized for specific data types. The framework also supports advanced features like field groups, tabs, and custom validation through the validate() method pattern.\n\nFor enterprise scenarios, the SysOperationController and SysOperationServiceController classes provide Dialog integration with the SysOperation framework, enabling automatic UI generation from data contract classes and seamless integration with batch processing.",
+      "code_examples": [
+        {
+          "title": "Basic Dialog with Multiple Field Types",
+          "description": "Demonstrates creating a dialog with various field types including string, integer, enum, and date fields with proper validation",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Creates a parameter dialog for customer data import\n/// </summary>\nclass CustomerImportDialog\n{\n    Dialog                  dialog;\n    DialogField            dlgCustomerGroup;\n    DialogField            dlgCreditLimit;\n    DialogField            dlgPaymTerms;\n    DialogField            dlgActiveDate;\n    DialogField            dlgFilePath;\n    \n    public void new()\n    {\n        super();\n        dialog = new Dialog('Customer Import Parameters');\n    }\n    \n    protected void dialogPostRun(DialogRunbase _dialog)\n    {\n        super(_dialog);\n        \n        // Add fields in logical order\n        dlgFilePath = dialog.addFieldValue(extendedTypeStr(FilenameOpen), '');\n        dlgFilePath.label('Import file path');\n        dlgFilePath.mandatory(true);\n        \n        dlgCustomerGroup = dialog.addFieldValue(extendedTypeStr(CustGroupId), '');\n        dlgCustomerGroup.label('Default customer group');\n        dlgCustomerGroup.lookupButton(2); // Enable lookup\n        \n        dlgCreditLimit = dialog.addFieldValue(extendedTypeStr(AmountMST), 10000);\n        dlgCreditLimit.label('Default credit limit');\n        \n        dlgPaymTerms = dialog.addFieldValue(extendedTypeStr(PaymTermId), '');\n        dlgPaymTerms.lookupButton(2);\n        \n        dlgActiveDate = dialog.addFieldValue(extendedTypeStr(TransDate), today());\n        dlgActiveDate.label('Active from date');\n        \n        // Set dialog properties\n        dialog.caption('Customer Import Wizard');\n        dialog.allowUpdateOnSelectCtrl(true);\n    }\n    \n    public boolean validate()\n    {\n        boolean isValid = true;\n        \n        // Validate file path\n        if (!dlgFilePath.value() || !WinAPI::fileExists(dlgFilePath.value()))\n        {\n            error(strFmt('File %1 does not exist', dlgFilePath.value()));\n            isValid = false;\n        }\n        \n        // Validate customer group exists\n        if (dlgCustomerGroup.value())\n        {\n            CustGroup custGroup = CustGroup::find(dlgCustomerGroup.value());\n            if (!custGroup.RecId)\n            {\n                error(strFmt('Customer group %1 does not exist', dlgCustomerGroup.value()));\n                isValid = false;\n            }\n        }\n        \n        // Validate credit limit is positive\n        if (dlgCreditLimit.value() < 0)\n        {\n            error('Credit limit must be positive');\n            isValid = false;\n        }\n        \n        // Validate date is not in past for active operations\n        if (dlgActiveDate.value() < today())\n        {\n            warning('Active date is in the past - customers will be immediately active');\n        }\n        \n        return isValid;\n    }\n    \n    public boolean run()\n    {\n        boolean ret = false;\n        \n        if (dialog.run())\n        {\n            if (this.validate())\n            {\n                ret = this.processImport();\n            }\n        }\n        \n        return ret;\n    }\n    \n    private boolean processImport()\n    {\n        // Access dialog values for processing\n        str filePath = dlgFilePath.value();\n        CustGroupId custGroup = dlgCustomerGroup.value();\n        AmountMST creditLimit = dlgCreditLimit.value();\n        PaymTermId paymTerms = dlgPaymTerms.value();\n        TransDate activeDate = dlgActiveDate.value();\n        \n        info(strFmt('Processing import: %1 customers, group: %2, limit: %3', \n                   filePath, custGroup, creditLimit));\n        \n        // Actual import logic would go here\n        return true;\n    }\n    \n    static void main(Args _args)\n    {\n        CustomerImportDialog importDialog = new CustomerImportDialog();\n        importDialog.run();\n    }\n}"
+        },
+        {
+          "title": "Advanced Dialog with Custom Lookups and Field Dependencies",
+          "description": "Shows how to implement custom lookups, field dependencies, and dynamic field visibility based on user selections",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Advanced dialog with custom lookups and field dependencies\n/// </summary>\nclass AdvancedReportDialog extends RunBaseBatch\n{\n    Dialog                  dialog;\n    DialogField            dlgReportType;\n    DialogField            dlgDateRange;\n    DialogField            dlgFromDate;\n    DialogField            dlgToDate;\n    DialogField            dlgCustomerAccount;\n    DialogField            dlgVendorAccount;\n    DialogField            dlgDimension;\n    \n    // Parameters\n    ReportTypeEnum         reportType;\n    NoYesId                dateRange;\n    TransDate              fromDate;\n    TransDate              toDate;\n    CustAccount            customerAccount;\n    VendorAccount          vendorAccount;\n    str                    dimensionValue;\n    \n    #define.CurrentVersion(1)\n    #localmacro.CurrentList\n        reportType,\n        dateRange,\n        fromDate,\n        toDate,\n        customerAccount,\n        vendorAccount,\n        dimensionValue\n    #endmacro\n    \n    public Object dialog()\n    {\n        FormStringControl   stringControl;\n        \n        dialog = super();\n        \n        dlgReportType = dialog.addFieldValue(enumStr(ReportTypeEnum), reportType);\n        dlgReportType.label('Report type');\n        \n        dlgDateRange = dialog.addFieldValue(enumStr(NoYes), dateRange);\n        dlgDateRange.label('Use custom date range');\n        \n        dlgFromDate = dialog.addFieldValue(extendedTypeStr(TransDate), fromDate);\n        dlgFromDate.label('From date');\n        \n        dlgToDate = dialog.addFieldValue(extendedTypeStr(TransDate), toDate);\n        dlgToDate.label('To date');\n        \n        dlgCustomerAccount = dialog.addFieldValue(extendedTypeStr(CustAccount), customerAccount);\n        dlgCustomerAccount.label('Customer account');\n        dlgCustomerAccount.lookupButton(2);\n        \n        dlgVendorAccount = dialog.addFieldValue(extendedTypeStr(VendorAccount), vendorAccount);\n        dlgVendorAccount.label('Vendor account');\n        dlgVendorAccount.lookupButton(2);\n        \n        dlgDimension = dialog.addFieldValue(extendedTypeStr(DimensionValue), dimensionValue);\n        dlgDimension.label('Department');\n        dlgDimension.lookupButton(2);\n        \n        return dialog;\n    }\n    \n    public void dialogPostRun(DialogRunbase _dialog)\n    {\n        super(_dialog);\n        \n        // Set up field dependencies\n        this.updateFieldVisibility();\n        \n        // Register for field change events\n        dlgReportType.registerOverrideMethod(methodStr(FormStringControl, modified), \n                                           methodStr(AdvancedReportDialog, reportTypeModified), \n                                           this);\n        \n        dlgDateRange.registerOverrideMethod(methodStr(FormStringControl, modified), \n                                          methodStr(AdvancedReportDialog, dateRangeModified), \n                                          this);\n    }\n    \n    public boolean reportTypeModified(FormStringControl _control)\n    {\n        boolean ret = _control.modified();\n        \n        reportType = dlgReportType.value();\n        this.updateFieldVisibility();\n        \n        return ret;\n    }\n    \n    public boolean dateRangeModified(FormStringControl _control)\n    {\n        boolean ret = _control.modified();\n        \n        dateRange = dlgDateRange.value();\n        this.updateFieldVisibility();\n        \n        return ret;\n    }\n    \n    private void updateFieldVisibility()\n    {\n        // Show/hide date fields based on date range selection\n        dlgFromDate.visible(dateRange == NoYes::Yes);\n        dlgToDate.visible(dateRange == NoYes::Yes);\n        \n        // Show relevant account fields based on report type\n        switch (reportType)\n        {\n            case ReportTypeEnum::Customer:\n                dlgCustomerAccount.visible(true);\n                dlgVendorAccount.visible(false);\n                break;\n                \n            case ReportTypeEnum::Vendor:\n                dlgCustomerAccount.visible(false);\n                dlgVendorAccount.visible(true);\n                break;\n                \n            default:\n                dlgCustomerAccount.visible(false);\n                dlgVendorAccount.visible(false);\n                break;\n        }\n    }\n    \n    public void performCustomLookup(FormControl _formControl, str _filterStr)\n    {\n        Query                   query;\n        QueryBuildDataSource    qbds;\n        SysTableLookup          lookup;\n        \n        // Custom lookup for dimension field\n        if (_formControl == dlgDimension.control())\n        {\n            query = new Query();\n            qbds = query.addDataSource(tableNum(DimensionAttributeValueCombination));\n            qbds.addRange(fieldNum(DimensionAttributeValueCombination, DisplayValue))\n                .value(_filterStr ? _filterStr : '*');\n                \n            lookup = SysTableLookup::newParameters(tableNum(DimensionAttributeValueCombination), \n                                                   _formControl);\n            lookup.addLookupfield(fieldNum(DimensionAttributeValueCombination, DisplayValue));\n            lookup.addLookupfield(fieldNum(DimensionAttributeValueCombination, Description));\n            lookup.parmQuery(query);\n            lookup.performFormLookup();\n        }\n    }\n    \n    public boolean validate()\n    {\n        boolean ret = super();\n        \n        if (dateRange == NoYes::Yes)\n        {\n            if (!fromDate || !toDate)\n            {\n                error('From and To dates are required when using custom date range');\n                ret = false;\n            }\n            else if (fromDate > toDate)\n            {\n                error('From date cannot be later than To date');\n                ret = false;\n            }\n        }\n        \n        if (reportType == ReportTypeEnum::Customer && customerAccount)\n        {\n            if (!CustTable::exist(customerAccount))\n            {\n                error(strFmt('Customer account %1 does not exist', customerAccount));\n                ret = false;\n            }\n        }\n        \n        return ret;\n    }\n    \n    public container pack()\n    {\n        return [#CurrentVersion, #CurrentList];\n    }\n    \n    public boolean unpack(container _packedClass)\n    {\n        Version version = RunBase::getVersion(_packedClass);\n        \n        switch (version)\n        {\n            case #CurrentVersion:\n                [version, #CurrentList] = _packedClass;\n                break;\n                \n            default:\n                return false;\n        }\n        \n        return true;\n    }\n    \n    static void main(Args _args)\n    {\n        AdvancedReportDialog reportDialog = new AdvancedReportDialog();\n        \n        if (reportDialog.prompt())\n        {\n            reportDialog.runOperation();\n        }\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Dialog objects are created at runtime and don't require AOT form objects — ideal for dynamic UIs and batch parameter collection",
+        "DialogField types include DialogFieldString, DialogFieldInt, DialogFieldEnum, DialogFieldLookup, each with type-specific methods and validation",
+        "Use registerOverrideMethod() to handle field events like modified() for implementing field dependencies and dynamic behavior",
+        "Dialog.lookupButton(2) enables standard lookup functionality, while performCustomLookup() allows completely custom lookup implementations",
+        "Always implement validate() method for business logic validation — it's called automatically when the user clicks OK",
+        "Dialog integrates seamlessly with RunBase pattern through DialogRunbase for batch job parameter collection and persistence"
+      ],
+      "gotchas": [
+        "Don't call dialog.run() multiple times — Dialog objects are single-use and will throw runtime errors on subsequent runs, create new instances instead",
+        "DialogField.value() returns the current field value but doesn't trigger validation — always call validate() explicitly before processing user input",
+        "Custom lookups require proper Query setup and SysTableLookup configuration — missing addLookupfield() calls result in empty lookup forms that confuse users"
+      ],
+      "performance_tips": [
+        "Cache DialogField references in class variables rather than calling dialog.field() repeatedly — field lookup by name is expensive in large dialogs",
+        "Use dialog.allowUpdateOnSelectCtrl(true) to enable real-time field updates, but be cautious with expensive validation logic in modified() methods"
+      ],
+      "related_topics": [
+        "xpp_runbase",
+        "xpp_sysoperation",
+        "xpp_batch"
+      ],
+      "quiz": [
+        {
+          "q": "What is the correct way to make a DialogField mandatory and add lookup functionality?",
+          "options": [
+            "dlgField.required(true); dlgField.addLookup();",
+            "dlgField.mandatory(true); dlgField.lookupButton(2);",
+            "dlgField.setMandatory(); dlgField.enableLookup();",
+            "dlgField.mustFill(true); dlgField.lookup(true);"
+          ],
+          "answer": 1,
+          "explanation": "DialogField.mandatory(true) sets the field as required, and lookupButton(2) enables the standard lookup button. The parameter 2 indicates a lookup button with dropdown arrow."
+        },
+        {
+          "q": "When implementing field dependencies in dialogs, where should you register field change event handlers?",
+          "options": [
+            "In the validate() method",
+            "In the dialog() method immediately after creating fields",
+            "In the dialogPostRun() method after dialog initialization",
+            "In the constructor before creating the dialog"
+          ],
+          "answer": 2,
+          "explanation": "Event handlers should be registered in dialogPostRun() because the underlying form controls are not available until after the dialog is fully initialized and running."
+        },
+        {
+          "q": "What happens if you call dialog.run() on the same Dialog object twice?",
+          "options": [
+            "The dialog displays again with the same values",
+            "The dialog displays with cleared/default values",
+            "A runtime error occurs because Dialog objects are single-use",
+            "The second call is ignored and returns false"
+          ],
+          "answer": 2,
+          "explanation": "Dialog objects are single-use in D365 F&O. Once run() completes, the internal form is disposed and cannot be reused. Always create a new Dialog instance for subsequent displays."
+        }
+      ]
+    },
+    "generated_date": "2026-03-16",
+    "auto_generated": true
   }
 ]

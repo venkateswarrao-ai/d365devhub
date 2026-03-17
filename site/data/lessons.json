@@ -945,5 +945,103 @@
     },
     "generated_date": "2026-03-16",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_maps",
+    "title": "Table Maps & Map Extensions",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "table-maps",
+      "polymorphism",
+      "inheritance",
+      "aot",
+      "data-modeling"
+    ],
+    "summary": "Master table maps for polymorphic data access patterns and learn how map extensions enable framework-agnostic code across multiple table implementations.",
+    "content": {
+      "overview": "Table maps in D365 F&O provide a powerful polymorphic abstraction layer that allows X++ code to work uniformly across multiple tables sharing common fields and business logic. Unlike table inheritance, maps create a virtual interface that multiple concrete tables can implement, enabling framework-agnostic programming patterns essential for extensible applications.\n\nMaps are particularly valuable in scenarios where you need to write generic business logic that operates on different tables with similar structures — such as dimension processing, workflow implementations, or integration patterns. They solve the fundamental challenge of code reusability when working with heterogeneous table structures that share common behavioral contracts.\n\nMap extensions, introduced in later D365 versions, further enhance this capability by allowing partners and ISVs to extend existing maps with additional fields or methods without modifying the base application, maintaining upgradeability while enabling deep customizations.",
+      "theory": "Table maps are AOT objects that define a contract — a set of fields and methods — that concrete tables can implement by mapping their physical fields to the map's logical fields. The D365 kernel handles the runtime binding, translating map field references to actual table fields based on the current table context. This abstraction is implemented through the MapImplementationTable relationship in the AOT, where each participating table defines field mappings via the Mappings node.\n\nThe architecture leverages X++'s late binding capabilities. When you instantiate a map using a specific table (via the Map::table() method), the kernel creates a proxy that redirects field access and method calls to the underlying table implementation. This enables true polymorphism — your business logic remains unchanged whether operating on CustTable, VendTable, or any other table implementing the same map contract.\n\nMap extensions utilize the standard D365 extensibility framework, allowing you to add fields through table extensions on the map itself, then extend the field mappings on participating tables. The kernel automatically handles the extended contract during runtime resolution, maintaining backward compatibility while enabling rich customizations.",
+      "code_examples": [
+        {
+          "title": "Basic Map Usage with AddressMap",
+          "description": "Demonstrates how to use the standard AddressMap to access address information polymorphically across Customer and Vendor tables",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Demonstrates polymorphic address access using AddressMap\n/// </summary>\nstatic void AddressMapExample(Args _args)\n{\n    AddressMap      addressMap;\n    CustTable       custTable;\n    VendTable       vendTable;\n    \n    // Working with Customer address\n    select firstonly custTable where custTable.AccountNum == '1001';\n    if (custTable.RecId)\n    {\n        // Map the customer table to AddressMap contract\n        addressMap = AddressMap::construct();\n        addressMap.table(custTable);\n        \n        info(strFmt(\"Customer: %1, City: %2, Country: %3\",\n                   addressMap.Name,\n                   addressMap.City,\n                   addressMap.CountryRegionId));\n    }\n    \n    // Same code works with Vendor - this is the power of maps\n    select firstonly vendTable where vendTable.AccountNum == '1001';\n    if (vendTable.RecId)\n    {\n        addressMap = AddressMap::construct();\n        addressMap.table(vendTable);\n        \n        info(strFmt(\"Vendor: %1, City: %2, Country: %3\",\n                   addressMap.Name,\n                   addressMap.City,\n                   addressMap.CountryRegionId));\n    }\n}\n\n/// <summary>\n/// Generic method that works with any table implementing AddressMap\n/// </summary>\nstatic void processAddressEntity(Common _table)\n{\n    AddressMap  addressMap;\n    \n    if (!_table.RecId)\n        return;\n        \n    addressMap = AddressMap::construct();\n    \n    try\n    {\n        addressMap.table(_table);\n        \n        // This business logic is table-agnostic\n        if (addressMap.CountryRegionId == 'USA')\n        {\n            info(strFmt(\"US Entity: %1 located in %2\",\n                       addressMap.Name,\n                       addressMap.City));\n        }\n    }\n    catch (Exception::Error)\n    {\n        error(\"Table does not implement AddressMap contract\");\n    }\n}"
+        },
+        {
+          "title": "Custom Map Implementation with Extensions",
+          "description": "Shows how to create a custom map for financial dimensions and extend it with additional fields",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Example using a custom FinancialDimensionMap (hypothetical)\n/// Demonstrates map extension patterns\n/// </summary>\nclass FinancialDimensionProcessor\n{\n    /// <summary>\n    /// Process dimension data using map abstraction\n    /// </summary>\n    public void processDimensionEntity(Common _dimTable)\n    {\n        // Assuming custom FinancialDimensionMap exists\n        // This pattern works with LedgerJournalTrans, GeneralJournalEntry, etc.\n        \n        FinancialDimensionMap   dimMap;\n        DimensionAttributeValueSet  valueSet;\n        \n        if (!_dimTable.RecId)\n            return;\n            \n        ttsbegin;\n        \n        try\n        {\n            dimMap = FinancialDimensionMap::construct();\n            dimMap.table(_dimTable);\n            \n            // Map provides unified access regardless of source table\n            valueSet = dimMap.getDefaultDimensionValueSet();\n            \n            if (valueSet)\n            {\n                // Business logic using map interface\n                this.validateDimensionCombination(dimMap);\n                this.applyDimensionDefaults(dimMap);\n                \n                // Extended map fields (added via extension)\n                if (dimMap.ResponsibilityCenter) // Extended field\n                {\n                    this.processResponsibilityCenter(dimMap.ResponsibilityCenter);\n                }\n            }\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            error(\"Failed to process financial dimensions\");\n            throw;\n        }\n    }\n    \n    private void validateDimensionCombination(FinancialDimensionMap _dimMap)\n    {\n        // Validation logic that works across all implementing tables\n        DimensionAttribute  department = DimensionAttribute::findByName('Department');\n        DimensionAttribute  costCenter = DimensionAttribute::findByName('CostCenter');\n        \n        str departmentValue = _dimMap.getDimensionValue(department);\n        str costCenterValue = _dimMap.getDimensionValue(costCenter);\n        \n        if (departmentValue && !costCenterValue)\n        {\n            warning(\"Department specified but Cost Center is missing\");\n        }\n    }\n    \n    private void applyDimensionDefaults(FinancialDimensionMap _dimMap)\n    {\n        // Apply business rules using map interface\n        if (!_dimMap.getDefaultDimensionValueSet())\n        {\n            // Create default dimension set based on business rules\n            _dimMap.createDefaultDimensionFromEntity();\n        }\n    }\n}"
+        },
+        {
+          "title": "Advanced Map Pattern with Runtime Table Discovery",
+          "description": "Demonstrates dynamic table discovery and map binding for extensible processing patterns",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Advanced pattern: Dynamic map processing with runtime table discovery\n/// Used in framework scenarios where table types are determined at runtime\n/// </summary>\nclass DynamicMapProcessor\n{\n    Map                 tableMapRegistry;\n    \n    public void new()\n    {\n        super();\n        this.initializeMapRegistry();\n    }\n    \n    /// <summary>\n    /// Initialize registry of tables that implement specific maps\n    /// </summary>\n    private void initializeMapRegistry()\n    {\n        tableMapRegistry = new Map(Types::String, Types::Class);\n        \n        // Register tables that implement AddressMap\n        tableMapRegistry.insert('AddressMap', classStr(AddressMap));\n        \n        // Could be extended to register custom maps\n        tableMapRegistry.insert('FinancialDimensionMap', classStr(FinancialDimensionMap));\n    }\n    \n    /// <summary>\n    /// Process any table using appropriate map abstraction\n    /// </summary>\n    public boolean processTableWithMap(Common _table, str _mapName)\n    {\n        boolean         ret = false;\n        Object          mapInstance;\n        ClassId         mapClassId;\n        DictClass       dictClass;\n        \n        if (!_table.RecId || !_mapName)\n            return ret;\n            \n        try\n        {\n            // Runtime map class resolution\n            mapClassId = tableMapRegistry.lookup(_mapName);\n            if (!mapClassId)\n            {\n                warning(strFmt(\"Map %1 not registered\", _mapName));\n                return ret;\n            }\n            \n            dictClass = new DictClass(mapClassId);\n            \n            // Create map instance using reflection\n            mapInstance = dictClass.makeObject();\n            \n            if (mapInstance is AddressMap)\n            {\n                ret = this.processAddressMap(mapInstance as AddressMap, _table);\n            }\n            else if (mapInstance is FinancialDimensionMap)\n            {\n                ret = this.processFinancialDimensionMap(mapInstance as FinancialDimensionMap, _table);\n            }\n        }\n        catch (Exception::Error)\n        {\n            error(strFmt(\"Failed to process table %1 with map %2\", \n                        _table.TableId, _mapName));\n        }\n        \n        return ret;\n    }\n    \n    private boolean processAddressMap(AddressMap _addressMap, Common _table)\n    {\n        boolean ret = false;\n        \n        try\n        {\n            _addressMap.table(_table);\n            \n            // Generic address processing\n            if (_addressMap.CountryRegionId)\n            {\n                info(strFmt(\"Processing address for %1 in %2\", \n                           _addressMap.Name, \n                           _addressMap.CountryRegionId));\n                ret = true;\n            }\n        }\n        catch (Exception::Error)\n        {\n            error(\"Table does not properly implement AddressMap\");\n        }\n        \n        return ret;\n    }\n    \n    /// <summary>\n    /// Batch process multiple tables with same map contract\n    /// </summary>\n    public void batchProcessEntitiesWithMap(str _mapName, container _tableIds)\n    {\n        int             i;\n        TableId         tableId;\n        Common          table;\n        DictTable       dictTable;\n        \n        for (i = 1; i <= conLen(_tableIds); i++)\n        {\n            tableId = conPeek(_tableIds, i);\n            dictTable = new DictTable(tableId);\n            \n            if (dictTable)\n            {\n                table = dictTable.makeRecord();\n                \n                // Process first 10 records from each table\n                while select table\n                    order by RecId\n                {\n                    if (!this.processTableWithMap(table, _mapName))\n                    {\n                        warning(strFmt(\"Skipped record in table %1\", dictTable.name()));\n                    }\n                    \n                    // Limit for demo purposes\n                    if (table.RecId > 10)\n                        break;\n                }\n            }\n        }\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Maps provide polymorphic abstraction over multiple tables sharing common field contracts — use AddressMap, TaxMap, and other standard maps before creating custom ones",
+        "Field mappings are defined in AOT under each table's Mappings node — ensure proper mapping of logical map fields to physical table fields for correct runtime behavior",
+        "Map extensions allow adding fields to existing maps without modifying base code — extend the map table, then extend field mappings on implementing tables",
+        "Use Map::construct() and table() method for proper initialization — direct instantiation bypasses kernel's polymorphic binding mechanism",
+        "Runtime type checking with 'is' operator ensures safe casting when working with maps in generic processing scenarios"
+      ],
+      "gotchas": [
+        "Forgetting to call table() method after map construction results in null reference exceptions — the map must be bound to a concrete table instance before field access",
+        "Not all standard tables implement all maps — wrap map.table() calls in try/catch blocks to handle tables that don't implement the expected map contract",
+        "Map field mappings are cached at startup — changes to Mappings node require full IL generation and application restart to take effect in development"
+      ],
+      "performance_tips": [
+        "Cache map instances when processing multiple records from the same table — repeated Map::construct() calls add unnecessary overhead",
+        "Use specific map types rather than generic Common references to enable compile-time optimization and IntelliSense support"
+      ],
+      "related_topics": [
+        "xpp_classes",
+        "xpp_tables",
+        "xpp_coc",
+        "xpp_reflection"
+      ],
+      "quiz": [
+        {
+          "q": "What is the correct way to initialize a map for use with a specific table?",
+          "options": [
+            "map = new AddressMap(); map.init(table);",
+            "map = AddressMap::construct(); map.table(table);",
+            "map = AddressMap::find(table.RecId);",
+            "map = table.getMap(AddressMap::class);"
+          ],
+          "answer": 1,
+          "explanation": "Maps must be constructed using the construct() method, then bound to a table using table(). This enables the kernel's polymorphic field mapping."
+        },
+        {
+          "q": "What happens if you try to bind a map to a table that doesn't implement the map's contract?",
+          "options": [
+            "The map returns default values for all fields",
+            "An Exception::Error is thrown",
+            "The operation silently fails with null values",
+            "The kernel automatically creates the mapping"
+          ],
+          "answer": 1,
+          "explanation": "When a table doesn't implement the required map contract (missing field mappings), the kernel throws Exception::Error during the table() method call."
+        },
+        {
+          "q": "How do map extensions maintain upgradeability while adding functionality?",
+          "options": [
+            "They create new maps that inherit from base maps",
+            "They modify the original map metadata directly",
+            "They extend the map table and add field mappings on implementing tables",
+            "They use reflection to dynamically add fields at runtime"
+          ],
+          "answer": 2,
+          "explanation": "Map extensions work by extending the map table itself (adding fields), then extending the Mappings node on each implementing table to map the new fields, maintaining the original map contract while adding functionality."
+        }
+      ]
+    },
+    "generated_date": "2026-03-17",
+    "auto_generated": true
   }
 ]

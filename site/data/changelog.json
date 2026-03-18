@@ -1,5 +1,13 @@
 [
   {
+    "date": "Mar 18",
+    "tag": "LESSON",
+    "title": "Global Class & Utility Methods",
+    "section": "X++ Language",
+    "level": "Beginner",
+    "id": "xpp_global_class"
+  },
+  {
     "date": "Mar 17",
     "tag": "LESSON",
     "title": "Table Maps & Map Extensions",

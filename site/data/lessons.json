@@ -1043,5 +1043,96 @@
     },
     "generated_date": "2026-03-17",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_global_class",
+    "title": "Global Class & Utility Methods",
+    "section": "X++ Language",
+    "level": "Beginner",
+    "duration": "12 min read",
+    "tags": [
+      "xpp",
+      "global-class",
+      "utility-methods",
+      "static-methods",
+      "best-practices"
+    ],
+    "summary": "Learn how to create and use the Global class for housing static utility methods that provide system-wide functionality in D365 F&O.",
+    "content": {
+      "overview": "The Global class in D365 F&O serves as a centralized repository for static utility methods that can be accessed from anywhere in the system without instantiation. This class provides essential helper functions for common operations like string manipulation, date calculations, number formatting, and system utilities. Understanding the Global class is fundamental for D365 development as it promotes code reuse, maintains consistency across the application, and provides a standardized way to implement common business logic.\n\nThe Global class follows a static-only pattern where all methods are declared as static, making them accessible via Global::methodName() syntax. This approach is particularly valuable for utility functions that don't require object state and can operate purely on their input parameters. Microsoft has extensively used this pattern throughout the standard application, and custom implementations should follow the same architectural principles.",
+      "theory": "In the D365 F&O AOT structure, the Global class (located under Classes node) is a special system class that's automatically available throughout the application without import statements or explicit references. The class inherits from Object but should only contain static methods to maintain the utility pattern. The Global class is loaded early in the application startup sequence, ensuring its methods are available for framework initialization and runtime operations.\n\nThe architectural significance lies in the Global class being part of the kernel layer, making it accessible from both client and server tiers. When developing custom Global methods, consider that they execute in the tier where they're called unless explicitly decorated with server/client attributes. The class supports method overloading but not method overriding since all methods should be static. Microsoft's standard Global class contains over 200 utility methods covering areas like string operations (Global::strFmt), date manipulation (Global::utcDateTime2SystemDateTime), mathematical operations (Global::round), and system functions (Global::info, Global::error).",
+      "code_examples": [
+        {
+          "title": "Basic Global Class Utility Methods",
+          "description": "Creating custom utility methods in the Global class for common business operations like tax calculation and string formatting",
+          "language": "xpp",
+          "code": "// In Global class - custom utility methods\npublic static class Global\n{\n    /// <summary>\n    /// Calculates tax amount based on net amount and tax percentage\n    /// </summary>\n    /// <param name=\"_netAmount\">Net amount before tax</param>\n    /// <param name=\"_taxPercentage\">Tax percentage (e.g., 0.25 for 25%)</param>\n    /// <returns>Tax amount</returns>\n    public static Amount calculateTaxAmount(Amount _netAmount, Percent _taxPercentage)\n    {\n        Amount taxAmount;\n        \n        if (_netAmount <= 0 || _taxPercentage < 0)\n        {\n            return 0;\n        }\n        \n        taxAmount = _netAmount * (_taxPercentage / 100);\n        return Global::round(taxAmount, 0.01); // Round to 2 decimal places\n    }\n    \n    /// <summary>\n    /// Formats customer account with company prefix\n    /// </summary>\n    /// <param name=\"_custAccount\">Customer account number</param>\n    /// <param name=\"_dataAreaId\">Company ID</param>\n    /// <returns>Formatted customer account string</returns>\n    public static str formatCustomerAccount(CustAccount _custAccount, DataAreaId _dataAreaId = curext())\n    {\n        if (!_custAccount)\n        {\n            return \"\";\n        }\n        \n        return Global::strFmt(\"%1-%2\", _dataAreaId, _custAccount);\n    }\n    \n    /// <summary>\n    /// Validates email format using regular expression\n    /// </summary>\n    /// <param name=\"_email\">Email address to validate</param>\n    /// <returns>True if email format is valid</returns>\n    public static boolean isValidEmail(Email _email)\n    {\n        System.Text.RegularExpressions.Regex emailRegex;\n        str pattern = @\"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}$\";\n        \n        if (!_email)\n        {\n            return false;\n        }\n        \n        try\n        {\n            emailRegex = new System.Text.RegularExpressions.Regex(pattern);\n            return emailRegex.IsMatch(_email);\n        }\n        catch (Exception::CLRError)\n        {\n            Global::error(\"Error validating email format\");\n            return false;\n        }\n    }\n}"
+        },
+        {
+          "title": "Advanced Global Methods with Error Handling",
+          "description": "Production-grade Global methods demonstrating proper error handling, logging, and integration with D365 framework classes",
+          "language": "xpp",
+          "code": "// Advanced Global class methods with comprehensive error handling\npublic static class Global\n{\n    /// <summary>\n    /// Safely retrieves customer credit limit with fallback logic\n    /// </summary>\n    /// <param name=\"_custAccount\">Customer account</param>\n    /// <param name=\"_useCompanyDefault\">Use company default if customer not found</param>\n    /// <returns>Credit limit amount</returns>\n    public static AmountMST getCustomerCreditLimit(CustAccount _custAccount, boolean _useCompanyDefault = true)\n    {\n        CustTable custTable;\n        CompanyInfo companyInfo;\n        AmountMST creditLimit = 0;\n        \n        try\n        {\n            if (!_custAccount)\n            {\n                throw Exception::Error;\n            }\n            \n            select firstonly CreditMax from custTable\n                where custTable.AccountNum == _custAccount;\n            \n            if (custTable.RecId)\n            {\n                creditLimit = custTable.CreditMax;\n            }\n            else if (_useCompanyDefault)\n            {\n                select firstonly DefaultCreditLimit from companyInfo\n                    where companyInfo.DataArea == curext();\n                    \n                creditLimit = companyInfo.DefaultCreditLimit;\n                \n                Global::warning(Global::strFmt(\"Customer %1 not found, using company default credit limit: %2\",\n                    _custAccount, \n                    Global::num2StrInUserLanguage(creditLimit, -1, 2, 1, 0)));\n            }\n        }\n        catch (Exception::Error)\n        {\n            Global::error(Global::strFmt(\"Failed to retrieve credit limit for customer %1\", _custAccount));\n            creditLimit = 0;\n        }\n        \n        return creditLimit;\n    }\n    \n    /// <summary>\n    /// Converts container to JSON string for API integration\n    /// </summary>\n    /// <param name=\"_container\">Container with key-value pairs</param>\n    /// <returns>JSON formatted string</returns>\n    public static str containerToJson(container _container)\n    {\n        System.Text.StringBuilder jsonBuilder;\n        int i;\n        str key, value;\n        boolean firstElement = true;\n        \n        if (!_container)\n        {\n            return \"{}\";\n        }\n        \n        try\n        {\n            jsonBuilder = new System.Text.StringBuilder();\n            jsonBuilder.Append(\"{\");\n            \n            for (i = 1; i <= conLen(_container); i += 2)\n            {\n                if (i + 1 <= conLen(_container))\n                {\n                    key = conPeek(_container, i);\n                    value = conPeek(_container, i + 1);\n                    \n                    if (!firstElement)\n                    {\n                        jsonBuilder.Append(\",\");\n                    }\n                    \n                    jsonBuilder.Append(Global::strFmt('\"\\\"%1\\\":\\\"%2\\\"\"', key, value));\n                    firstElement = false;\n                }\n            }\n            \n            jsonBuilder.Append(\"}\");\n            return jsonBuilder.ToString();\n        }\n        catch (Exception::CLRError)\n        {\n            Global::error(\"Failed to convert container to JSON format\");\n            return \"{}\";\n        }\n    }\n    \n    /// <summary>\n    /// Thread-safe singleton pattern for caching expensive operations\n    /// </summary>\n    /// <returns>Cached exchange rates container</returns>\n    public static container getCachedExchangeRates()\n    {\n        static container exchangeRatesCache;\n        static utcDateTime lastCacheUpdate;\n        utcDateTime currentTime = DateTimeUtil::utcNow();\n        int cacheValidityHours = 1;\n        \n        // Check if cache needs refresh (older than 1 hour)\n        if (!exchangeRatesCache || \n            DateTimeUtil::getDifference(currentTime, lastCacheUpdate) > cacheValidityHours * 3600)\n        {\n            try\n            {\n                ExchangeRate exchangeRate;\n                container tempContainer;\n                \n                while select ExchangeRateType, FromCurrencyCode, ToCurrencyCode, ExchangeRate \n                    from exchangeRate\n                    where exchangeRate.ValidFrom <= currentTime &&\n                          exchangeRate.ValidTo >= currentTime\n                {\n                    tempContainer += [exchangeRate.FromCurrencyCode + exchangeRate.ToCurrencyCode, \n                                    exchangeRate.ExchangeRate];\n                }\n                \n                exchangeRatesCache = tempContainer;\n                lastCacheUpdate = currentTime;\n                \n                Global::info(Global::strFmt(\"Exchange rates cache refreshed with %1 entries\", \n                    conLen(exchangeRatesCache) / 2));\n            }\n            catch (Exception::Error)\n            {\n                Global::error(\"Failed to refresh exchange rates cache\");\n                if (!exchangeRatesCache)\n                {\n                    exchangeRatesCache = conNull();\n                }\n            }\n        }\n        \n        return exchangeRatesCache;\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Global class methods must always be declared as static and should not maintain any instance state between calls",
+        "Use proper parameter validation and null checks at the beginning of each Global method to prevent runtime errors",
+        "Implement comprehensive error handling with try/catch blocks and provide meaningful error messages using Global::error() or Global::warning()",
+        "Follow naming conventions with descriptive method names and use XML documentation for IntelliSense support in the development environment",
+        "Consider thread safety when implementing caching mechanisms or static variables in Global methods, especially for server-side operations"
+      ],
+      "gotchas": [
+        "Never create instance variables in the Global class — this breaks the utility pattern and can cause memory leaks since the Global class is never garbage collected",
+        "Avoid calling non-static methods from Global methods without proper instantiation — this will cause compilation errors and violates the static-only principle",
+        "Don't perform database operations in Global methods without proper transaction handling — use ttsbegin/ttscommit when modifying data to maintain ACID properties"
+      ],
+      "performance_tips": [
+        "Cache expensive calculations or database lookups in static variables with appropriate cache invalidation logic to avoid repeated operations",
+        "Use StringBuilder for string concatenation operations instead of repeated string additions to prevent memory fragmentation"
+      ],
+      "related_topics": [
+        "xpp_classes",
+        "xpp_batch",
+        "xpp_sysoperation"
+      ],
+      "quiz": [
+        {
+          "q": "What is the correct way to declare a method in the Global class?",
+          "options": [
+            "public void calculateTax(Amount _amount)",
+            "public static real calculateTax(Amount _amount)",
+            "private static void calculateTax(Amount _amount)",
+            "protected real calculateTax(Amount _amount)"
+          ],
+          "answer": 1,
+          "explanation": "Why B is correct: Global class methods must be declared as public static to be accessible from anywhere in the application. The static keyword ensures the method can be called without instantiating the class, and public visibility allows system-wide access."
+        },
+        {
+          "q": "Which of the following is a best practice when implementing error handling in Global methods?",
+          "options": [
+            "Use throw statements without try/catch blocks",
+            "Return null values without logging errors",
+            "Use try/catch blocks with Global::error() for logging",
+            "Ignore exceptions to prevent application crashes"
+          ],
+          "answer": 2,
+          "explanation": "Why C is correct: Proper error handling in Global methods requires try/catch blocks to gracefully handle exceptions and Global::error() to log meaningful error messages. This approach provides better debugging capabilities and maintains application stability."
+        },
+        {
+          "q": "What happens if you try to create instance variables in the Global class?",
+          "options": [
+            "The variables work normally like in any other class",
+            "The compiler generates a warning but allows compilation",
+            "It breaks the utility pattern and can cause memory issues",
+            "The variables are automatically converted to static"
+          ],
+          "answer": 2,
+          "explanation": "Why C is correct: Creating instance variables in the Global class violates the static utility pattern and can cause memory leaks since the Global class instance is never garbage collected. All Global class members should be static methods only."
+        }
+      ]
+    },
+    "generated_date": "2026-03-18",
+    "auto_generated": true
   }
 ]

@@ -1,5 +1,13 @@
 [
   {
+    "date": "Mar 19",
+    "tag": "LESSON",
+    "title": "Label Files & Multi-Language Support",
+    "section": "X++ Language",
+    "level": "Beginner",
+    "id": "xpp_label_files"
+  },
+  {
     "date": "Mar 18",
     "tag": "LESSON",
     "title": "Global Class & Utility Methods",

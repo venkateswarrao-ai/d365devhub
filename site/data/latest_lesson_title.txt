@@ -1,1 +1,1 @@
-Global Class & Utility Methods
+Label Files & Multi-Language Support

@@ -1,5 +1,5 @@
 {
-  "last_index": 9,
+  "last_index": 10,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -22,9 +22,10 @@
     "xpp_sysoperation",
     "xpp_dialogs",
     "xpp_maps",
-    "xpp_global_class"
+    "xpp_global_class",
+    "xpp_label_files"
   ],
-  "last_run": "2026-03-18",
-  "last_title": "Global Class & Utility Methods",
+  "last_run": "2026-03-19",
+  "last_title": "Label Files & Multi-Language Support",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

@@ -1,1 +1,1 @@
-Label Files & Multi-Language Support
+EDTs: Inheritance, Relations, Lookups

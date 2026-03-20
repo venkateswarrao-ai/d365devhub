@@ -1225,5 +1225,103 @@
     },
     "generated_date": "2026-03-19",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_edt_base",
+    "title": "EDTs: Inheritance, Relations, Lookups",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "18 min read",
+    "tags": [
+      "EDT",
+      "Data Types",
+      "Inheritance",
+      "Relations",
+      "Lookups",
+      "AOT"
+    ],
+    "summary": "Master EDT inheritance hierarchies, table relations, and custom lookup implementations for robust data modeling in D365 F&O.",
+    "content": {
+      "overview": "Extended Data Types (EDTs) form the backbone of D365 F&O's data modeling layer, providing type safety, consistent validation, and centralized business logic. Unlike primitive types, EDTs encapsulate domain-specific behavior through inheritance hierarchies, automatic table relations, and customizable lookup experiences. Understanding EDT architecture is crucial for maintaining data integrity across modules and ensuring consistent user experiences.\n\nEDTs inherit from base types (like str, int, real) or other EDTs, creating powerful inheritance chains that cascade properties, relations, and formatting rules. This inheritance model enables you to define common business concepts once (like AccountNum) and specialize them for specific contexts (like CustAccount, VendAccount) while maintaining type compatibility and shared validation logic.\n\nIn enterprise D365 implementations, proper EDT design directly impacts performance, maintainability, and user productivity. Well-designed EDT hierarchies reduce code duplication, ensure consistent data validation across forms and reports, and provide intuitive lookup experiences that guide users to valid data selections.",
+      "theory": "EDTs in D365 F&O are metadata-driven type definitions stored in the AOT under Data Types > Extended Data Types. Each EDT inherits from either a primitive type (str, int, real, date, etc.) or another EDT, forming inheritance hierarchies that mirror business domain relationships. The SysDictType class manages EDT metadata at runtime, while the Global class provides static methods for EDT-based operations.\n\nInheritance in EDTs follows object-oriented principles but operates at the metadata level. Child EDTs automatically inherit parent properties including StringSize, Label, HelpText, and crucially, table relations. The EDT inheritance chain is resolved at compile time, with child properties overriding parent values. This enables patterns like AccountNum (base) → CustAccount (customer-specific) → CustInvoiceAccount (invoice-specific context).\n\nTable relations defined on EDTs create automatic foreign key constraints and enable lookup functionality. The kernel automatically generates join conditions and validates referential integrity based on these relations. The SysTableLookup class orchestrates lookup dialogs, while FormRun.performFormLookup() handles form-specific customizations. For complex scenarios, the SysReferenceTableLookup framework provides extensible lookup architecture supporting multi-field relations and custom filtering logic.",
+      "code_examples": [
+        {
+          "title": "EDT Inheritance Hierarchy with Relations",
+          "description": "Creating a specialized EDT that inherits properties and adds specific table relations",
+          "language": "xpp",
+          "code": "// Base EDT: ItemId (already exists in AOT)\n// Child EDT: ProdItemId - specialized for production items\n\n// This shows the X++ code that would be generated/used\nstatic void demonstrateEDTInheritance(Args _args)\n{\n    ItemId          baseItemId;\n    ProdItemId      prodItemId;\n    InventTable     inventTable;\n    ProdTable       prodTable;\n    \n    ttsbegin;\n    \n    try\n    {\n        // EDT inheritance allows assignment compatibility\n        baseItemId = 'D0001';\n        prodItemId = baseItemId;  // Valid: child can accept parent\n        \n        // Lookup behavior differs based on EDT relations\n        select firstonly inventTable\n            where inventTable.ItemId == baseItemId;\n            \n        if (inventTable)\n        {\n            info(strFmt(\"Found item: %1 - %2\", \n                inventTable.ItemId, \n                inventTable.itemName()));\n        }\n        \n        // ProdItemId EDT has additional relation to ProdTable\n        select firstonly prodTable\n            where prodTable.ItemId == prodItemId;\n            \n        if (prodTable)\n        {\n            info(strFmt(\"Production item: %1, Status: %2\", \n                prodTable.ItemId, \n                enum2Str(prodTable.ProdStatus)));\n        }\n        \n        ttscommit;\n    }\n    catch (Exception::Error)\n    {\n        ttsabort;\n        error(\"Error in EDT inheritance demo\");\n    }\n}"
+        },
+        {
+          "title": "Custom EDT Lookup with SysTableLookup",
+          "description": "Implementing custom lookup behavior for EDT-based fields using SysTableLookup framework",
+          "language": "xpp",
+          "code": "// Custom lookup for CustAccount EDT with filtering\npublic void custAccountLookup(FormControl _control)\n{\n    SysTableLookup      lookup;\n    QueryBuildDataSource qbds;\n    QueryBuildRange     qbr;\n    DictTable           dictTable;\n    \n    // Initialize lookup for CustTable\n    dictTable = new DictTable(tableNum(CustTable));\n    lookup = SysTableLookup::newParameters(tableNum(CustTable), _control);\n    \n    try\n    {\n        // Add fields to display in lookup\n        lookup.addLookupfield(fieldNum(CustTable, AccountNum), true); // Key field\n        lookup.addLookupfield(fieldNum(CustTable, Name));\n        lookup.addLookupfield(fieldNum(CustTable, CustGroup));\n        lookup.addLookupfield(fieldNum(CustTable, CurrencyCode));\n        \n        // Get query and add custom filtering\n        qbds = lookup.query().dataSourceTable(tableNum(CustTable));\n        \n        // Filter to only active customers\n        qbr = qbds.addRange(fieldNum(CustTable, Blocked));\n        qbr.value(enum2Str(CustVendorBlocked::No));\n        \n        // Additional business logic filter\n        qbr = qbds.addRange(fieldNum(CustTable, CustGroup));\n        qbr.value('10,20'); // Only specific customer groups\n        \n        // Set form caller information for context\n        if (_control.formRun().args() && _control.formRun().args().caller())\n        {\n            // Add caller-specific filtering logic here\n            info(\"Lookup called from: \" + _control.formRun().args().caller().caption());\n        }\n        \n        // Execute the lookup\n        lookup.performFormLookup();\n    }\n    catch (Exception::Error)\n    {\n        error(\"Error in custom customer lookup\");\n    }\n}"
+        },
+        {
+          "title": "EDT Validation and Business Logic",
+          "description": "Implementing EDT-level validation and business rules that cascade to all usage points",
+          "language": "xpp",
+          "code": "// EDT validation method - would be placed in Global class or EDT methods\nstatic boolean validateCustomEDT(str _value, str _edtName = '')\n{\n    boolean         isValid = true;\n    SysDictType     dictType;\n    \n    try\n    {\n        // Get EDT information\n        dictType = new SysDictType(extendedTypeStr(CustAccount));\n        \n        // Basic length validation (inherited from EDT properties)\n        if (strLen(_value) > dictType.stringLen())\n        {\n            error(strFmt(\"Value '%1' exceeds maximum length of %2\", \n                _value, dictType.stringLen()));\n            return false;\n        }\n        \n        // Custom business rule validation\n        if (_value && !CustTable::exist(_value))\n        {\n            warning(strFmt(\"Customer account '%1' does not exist\", _value));\n            // Don't return false - might be creating new customer\n        }\n        \n        // Pattern validation (could be defined in EDT properties)\n        if (_value && !match(_value, '^[A-Z0-9]{3,10}$'))\n        {\n            error(\"Customer account must be 3-10 alphanumeric characters\");\n            return false;\n        }\n        \n        // Cross-field validation example\n        if (_value)\n        {\n            CustTable custTable;\n            select firstonly custTable\n                where custTable.AccountNum == _value;\n                \n            if (custTable && custTable.Blocked != CustVendorBlocked::No)\n            {\n                warning(strFmt(\"Customer '%1' is blocked: %2\", \n                    _value, enum2Str(custTable.Blocked)));\n            }\n        }\n    }\n    catch (Exception::Error)\n    {\n        error(\"Validation error in custom EDT validation\");\n        isValid = false;\n    }\n    \n    return isValid;\n}\n\n// Usage in form or table validation\npublic boolean validateWrite()\n{\n    boolean ret = super();\n    \n    // Call EDT-specific validation\n    if (ret && this.CustAccount)\n    {\n        ret = Global::validateCustomEDT(this.CustAccount);\n    }\n    \n    return ret;\n}"
+        }
+      ],
+      "key_points": [
+        "EDT inheritance creates type-safe hierarchies where child EDTs can be assigned to parent EDT variables, but not vice versa without explicit casting",
+        "Table relations defined on parent EDTs automatically cascade to child EDTs, enabling consistent foreign key behavior across the inheritance chain",
+        "SysTableLookup provides the standard framework for EDT lookups, but complex scenarios require SysReferenceTableLookup for multi-table joins and advanced filtering",
+        "EDT properties (StringSize, Label, HelpText) are resolved at compile time through the inheritance chain, with child values overriding parent values",
+        "Form controls bound to EDT fields automatically inherit lookup behavior, validation rules, and formatting from the EDT definition, ensuring UI consistency"
+      ],
+      "gotchas": [
+        "Circular EDT inheritance will cause compilation errors — always verify inheritance chains don't loop back to parent types",
+        "Changing base EDT properties affects ALL child EDTs and dependent objects — use impact analysis tools before modifying widely-used base EDTs",
+        "EDT table relations don't automatically validate existence on insert/update — you must implement validateWrite() methods for referential integrity checks"
+      ],
+      "performance_tips": [
+        "Cache SysDictType objects when performing multiple EDT metadata operations to avoid repeated kernel calls",
+        "Use QueryBuildRange with specific values in custom lookups instead of complex where clauses to leverage SQL Server indexing"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_select",
+        "xpp_types"
+      ],
+      "quiz": [
+        {
+          "q": "What happens when you assign a parent EDT value to a child EDT variable?",
+          "options": [
+            "Compilation error occurs",
+            "Runtime error occurs",
+            "Assignment works without issues",
+            "Implicit conversion requires casting"
+          ],
+          "answer": 0,
+          "explanation": "Compilation error occurs because EDT inheritance follows strict type safety — child EDTs can accept parent values, but parent EDT variables cannot hold child EDT values without explicit casting."
+        },
+        {
+          "q": "Which class is primarily responsible for managing EDT metadata at runtime?",
+          "options": [
+            "SysDictType",
+            "Global",
+            "SysTableLookup",
+            "FormRun"
+          ],
+          "answer": 0,
+          "explanation": "SysDictType class manages EDT metadata at runtime, providing access to properties like StringLen(), Label(), and inheritance information."
+        },
+        {
+          "q": "When do table relations defined on parent EDTs apply to child EDTs?",
+          "options": [
+            "Never - each EDT must define its own relations",
+            "Only when explicitly inherited",
+            "Automatically through inheritance cascade",
+            "Only at runtime through kernel resolution"
+          ],
+          "answer": 2,
+          "explanation": "Table relations automatically cascade through EDT inheritance, meaning child EDTs inherit all parent relations plus any additional relations they define themselves."
+        }
+      ]
+    },
+    "generated_date": "2026-03-20",
+    "auto_generated": true
   }
 ]

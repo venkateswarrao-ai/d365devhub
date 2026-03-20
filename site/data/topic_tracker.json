@@ -1,5 +1,5 @@
 {
-  "last_index": 10,
+  "last_index": 11,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -23,9 +23,10 @@
     "xpp_dialogs",
     "xpp_maps",
     "xpp_global_class",
-    "xpp_label_files"
+    "xpp_label_files",
+    "xpp_edt_base"
   ],
-  "last_run": "2026-03-19",
-  "last_title": "Label Files & Multi-Language Support",
+  "last_run": "2026-03-20",
+  "last_title": "EDTs: Inheritance, Relations, Lookups",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

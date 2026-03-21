@@ -1,5 +1,13 @@
 [
   {
+    "date": "Mar 21",
+    "tag": "LESSON",
+    "title": "postLoad, initValue & modifiedField",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "id": "xpp_postload"
+  },
+  {
     "date": "Mar 20",
     "tag": "LESSON",
     "title": "EDTs: Inheritance, Relations, Lookups",

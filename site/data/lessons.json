@@ -1323,5 +1323,101 @@
     },
     "generated_date": "2026-03-20",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_postload",
+    "title": "postLoad, initValue & modifiedField",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "18 min read",
+    "tags": [
+      "table_methods",
+      "data_validation",
+      "form_behavior",
+      "entity_lifecycle"
+    ],
+    "summary": "Master table method overrides for controlling data initialization, field validation, and record lifecycle events in D365 F&O applications.",
+    "content": {
+      "overview": "The postLoad, initValue, and modifiedField methods form the backbone of table-level business logic in D365 F&O, controlling how data behaves during its lifecycle from initialization to persistence. These methods are called at specific points in the entity lifecycle: initValue during record creation, postLoad after data retrieval, and modifiedField when field values change.\n\nUnderstanding when and how to override these methods is crucial for implementing proper data validation, calculated fields, and business rules that execute consistently across all access patterns—whether through forms, X++ code, or data entities. Unlike form-level events, these table methods ensure your logic runs regardless of how data is manipulated, making them essential for maintaining data integrity in enterprise applications.\n\nProper implementation of these methods can significantly impact application performance and user experience, especially in high-volume scenarios where inefficient postLoad logic can create bottlenecks during record retrieval operations.",
+      "theory": "These three methods represent different stages of the Active Record pattern implementation in D365 F&O's kernel architecture. The postLoad method executes after the kernel populates a table buffer from the database, making it the ideal location for calculated fields, derived values, and post-retrieval business logic. It's called by the kernel's select statement processing and form data source refresh operations.\n\nThe initValue method triggers during new record creation, before any user input, and should set default values based on system state, user context, or related data. This method is invoked by the kernel when allocating new table buffers through the new() method or when forms create new records via their data sources.\n\nThe modifiedField method implements the Observer pattern for field-level change detection. When any field value changes (through assignment or form controls), the kernel calls this method with the field ID, allowing you to implement cascading updates, validation, or dependent field calculations. The method receives the fieldNum() as a parameter, enabling field-specific logic branching.\n\nThese methods integrate deeply with the Application Object Server (AOS) transaction model. Changes made within these methods participate in the current transaction scope, and exceptions thrown here will properly roll back related changes. The kernel ensures these methods execute within the appropriate company context and security permissions.",
+      "code_examples": [
+        {
+          "title": "postLoad Implementation for Calculated Fields",
+          "description": "Demonstrates postLoad usage for deriving calculated fields and setting display values that depend on related data",
+          "language": "xpp",
+          "code": "// CustTable extension for customer credit analysis\npublic void postLoad()\n{\n    super();\n    \n    // Calculate derived fields after record load\n    this.calcAvailableCredit();\n    this.setCustomerRiskLevel();\n    \n    // Set display-only fields based on current state\n    if (this.Blocked != CustVendorBlocked::No)\n    {\n        this.DisplayWarning = \"Customer account is blocked\";\n    }\n    \n    // Performance tip: Only load expensive calculations when needed\n    if (this.isFormContext())\n    {\n        this.loadRecentOrderHistory();\n    }\n}\n\nprivate void calcAvailableCredit()\n{\n    CustCollectionLetter  collectionLetter;\n    AmountCur            totalCredit;\n    AmountCur            usedCredit;\n    \n    try\n    {\n        // Get credit limit from customer group if not set\n        if (!this.CreditMax)\n        {\n            CustGroup custGroup = CustGroup::find(this.CustGroup);\n            totalCredit = custGroup.CreditMaxMST;\n        }\n        else\n        {\n            totalCredit = this.CreditMax;\n        }\n        \n        // Calculate used credit from open transactions\n        select sum(AmountCur) from collectionLetter\n            where collectionLetter.AccountNum == this.AccountNum\n            && collectionLetter.Invoice != '';\n            \n        usedCredit = collectionLetter.AmountCur;\n        this.AvailableCredit = totalCredit - usedCredit;\n    }\n    catch (Exception::Error)\n    {\n        // Log error but don't break record loading\n        this.AvailableCredit = 0;\n        warning(\"Unable to calculate available credit for customer \" + this.AccountNum);\n    }\n}"
+        },
+        {
+          "title": "initValue for Smart Defaults",
+          "description": "Shows proper initValue implementation for setting context-aware default values during record creation",
+          "language": "xpp",
+          "code": "// SalesTable initValue for intelligent order defaults\npublic void initValue()\n{\n    super();\n    \n    CompanyInfo         companyInfo;\n    CustTable           custTable;\n    InventSiteActivate  siteActivate;\n    \n    // Set basic defaults\n    this.SalesId = NumberSeq::newGetNum(SalesParameters::numRefSalesId()).num();\n    this.OrderDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());\n    this.DeliveryDate = this.OrderDate + SalesParameters::find().StandardDeliveryDays;\n    this.SalesStatus = SalesStatus::Backorder;\n    this.CurrencyCode = CompanyInfo::standardCurrency();\n    \n    // Set user context defaults\n    this.WorkerSalesTaker = DirPersonUser::currentWorker();\n    \n    // Intelligent site defaulting based on user location\n    if (SysUserInfo::find().DefaultInventLocationId)\n    {\n        InventLocation location = InventLocation::find(SysUserInfo::find().DefaultInventLocationId);\n        this.InventSiteId = location.InventSiteId;\n    }\n    else\n    {\n        // Fall back to first active site\n        select firstonly InventSiteId from siteActivate\n            order by InventSiteId;\n        this.InventSiteId = siteActivate.InventSiteId;\n    }\n    \n    // Set customer-specific defaults if customer context exists\n    if (this.CustAccount)\n    {\n        custTable = CustTable::find(this.CustAccount);\n        this.CurrencyCode = custTable.Currency ? custTable.Currency : this.CurrencyCode;\n        this.InvoiceAccount = custTable.InvoiceAccount ? custTable.InvoiceAccount : this.CustAccount;\n        this.DlvMode = custTable.DlvMode;\n        this.DlvTerm = custTable.DlvTerm;\n        this.Payment = custTable.Payment;\n        \n        // Set delivery address from customer's primary address\n        LogisticsPostalAddress postalAddress = DirParty::primaryPostalAddress(custTable.Party);\n        if (postalAddress)\n        {\n            this.DeliveryName = DirParty::primaryAddressDisplayName(custTable.Party);\n        }\n    }\n    \n    // Initialize calculated fields\n    this.modifiedField(fieldNum(SalesTable, CurrencyCode));\n}"
+        },
+        {
+          "title": "modifiedField for Cascading Updates and Validation",
+          "description": "Complex modifiedField implementation showing field-specific logic, validation, and dependent field updates",
+          "language": "xpp",
+          "code": "// SalesTable modifiedField for comprehensive field change handling\npublic void modifiedField(FieldId _fieldId)\n{\n    CustTable       custTable;\n    InventTable     inventTable;\n    PriceDiscTable  priceDiscTable;\n    \n    super(_fieldId);\n    \n    switch (_fieldId)\n    {\n        case fieldNum(SalesTable, CustAccount):\n            if (this.CustAccount)\n            {\n                custTable = CustTable::find(this.CustAccount);\n                \n                // Validate customer is not blocked\n                if (custTable.Blocked != CustVendorBlocked::No)\n                {\n                    warning(strFmt(\"Customer %1 is blocked: %2\", \n                            this.CustAccount, \n                            enum2Str(custTable.Blocked)));\n                }\n                \n                // Update dependent fields\n                this.CurrencyCode = custTable.Currency ? custTable.Currency : CompanyInfo::standardCurrency();\n                this.InvoiceAccount = custTable.InvoiceAccount ? custTable.InvoiceAccount : this.CustAccount;\n                this.Payment = custTable.Payment;\n                this.CashDisc = custTable.CashDisc;\n                \n                // Trigger recalculation of dependent fields\n                this.modifiedField(fieldNum(SalesTable, CurrencyCode));\n                this.modifiedField(fieldNum(SalesTable, Payment));\n            }\n            else\n            {\n                // Clear dependent fields when customer is cleared\n                this.InvoiceAccount = '';\n                this.Payment = '';\n                this.CashDisc = '';\n            }\n            break;\n            \n        case fieldNum(SalesTable, CurrencyCode):\n            if (this.CurrencyCode)\n            {\n                // Update exchange rate\n                this.updateExchangeRate();\n                \n                // Validate currency is active\n                Currency currency = Currency::find(this.CurrencyCode);\n                if (!currency.RecId)\n                {\n                    error(strFmt(\"Currency code %1 is not valid\", this.CurrencyCode));\n                    this.CurrencyCode = CompanyInfo::standardCurrency();\n                }\n            }\n            break;\n            \n        case fieldNum(SalesTable, DeliveryDate):\n            // Validate delivery date is not in the past\n            if (this.DeliveryDate < DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()))\n            {\n                warning(\"Delivery date should not be in the past\");\n            }\n            \n            // Update requested receipt date for planning\n            this.ReceiptDateRequested = this.DeliveryDate - this.getStandardLeadTime();\n            break;\n            \n        case fieldNum(SalesTable, SalesPoolId):\n            if (this.SalesPoolId)\n            {\n                SalesPool salesPool = SalesPool::find(this.SalesPoolId);\n                if (salesPool.RecId)\n                {\n                    // Auto-assign sales rep from pool if not already set\n                    if (!this.WorkerSalesTaker)\n                    {\n                        this.WorkerSalesTaker = salesPool.getNextAvailableWorker();\n                    }\n                }\n            }\n            break;\n            \n        case fieldNum(SalesTable, ProjId):\n            if (this.ProjId)\n            {\n                ProjTable projTable = ProjTable::find(this.ProjId);\n                if (projTable.RecId)\n                {\n                    // Validate project is active\n                    if (projTable.Status != ProjStatus::InProcess)\n                    {\n                        error(strFmt(\"Project %1 is not active\", this.ProjId));\n                        this.ProjId = '';\n                    }\n                    else\n                    {\n                        // Set customer from project if not already set\n                        if (!this.CustAccount && projTable.CustAccount)\n                        {\n                            this.CustAccount = projTable.CustAccount;\n                            this.modifiedField(fieldNum(SalesTable, CustAccount));\n                        }\n                    }\n                }\n            }\n            break;\n    }\n    \n    // Always recalculate totals for critical field changes\n    if (this.isTotalCalculationTriggerField(_fieldId))\n    {\n        this.calcTotals(true);\n    }\n}\n\nprivate boolean isTotalCalculationTriggerField(FieldId _fieldId)\n{\n    return _fieldId == fieldNum(SalesTable, CurrencyCode) ||\n           _fieldId == fieldNum(SalesTable, CashDisc) ||\n           _fieldId == fieldNum(SalesTable, Payment);\n}"
+        }
+      ],
+      "key_points": [
+        "postLoad executes after database retrieval — use for calculated fields and derived values that shouldn't be stored",
+        "initValue runs during new record creation — implement smart defaults based on user context and system state",
+        "modifiedField triggers on any field assignment — implement validation and cascading updates here",
+        "Always call super() first in method overrides to ensure kernel functionality executes properly",
+        "Use fieldNum() constants instead of hardcoded field IDs for maintainable and refactor-safe code"
+      ],
+      "gotchas": [
+        "Infinite recursion in modifiedField — modifying fields within modifiedField can trigger recursive calls; use flags or careful field selection to prevent loops",
+        "Performance degradation in postLoad — expensive operations in postLoad execute on every record retrieval; use isFormContext() to limit costly operations to UI scenarios only",
+        "Transaction scope confusion — changes made in these methods participate in the current transaction; exceptions thrown here will roll back the entire operation, not just the method"
+      ],
+      "performance_tips": [
+        "Cache expensive calculations in postLoad using static variables or application cache to avoid repeated computation",
+        "Use exists joins instead of select statements in table methods to minimize database roundtrips during record processing"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_select",
+        "xpp_coc"
+      ],
+      "quiz": [
+        {
+          "q": "When is the postLoad method called in the table lifecycle?",
+          "options": [
+            "Before saving to database",
+            "After retrieving from database",
+            "During field validation",
+            "When creating new records"
+          ],
+          "answer": 1,
+          "explanation": "postLoad is called after the kernel retrieves and populates a table buffer from the database, making it ideal for calculated fields and post-retrieval business logic."
+        },
+        {
+          "q": "What parameter does the modifiedField method receive?",
+          "options": [
+            "Field name as string",
+            "FieldId enumeration value",
+            "Old and new field values",
+            "Table buffer reference"
+          ],
+          "answer": 1,
+          "explanation": "modifiedField receives a FieldId parameter (typically obtained using fieldNum()) that identifies which field was modified, enabling field-specific logic."
+        },
+        {
+          "q": "Which method should you override to set default values for new records?",
+          "options": [
+            "postLoad",
+            "modifiedField",
+            "initValue",
+            "validateWrite"
+          ],
+          "answer": 2,
+          "explanation": "initValue is called during new record creation and is the appropriate place to set default values based on system state, user context, or business rules."
+        }
+      ]
+    },
+    "generated_date": "2026-03-21",
+    "auto_generated": true
   }
 ]

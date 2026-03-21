@@ -1,5 +1,5 @@
 {
-  "last_index": 11,
+  "last_index": 12,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -24,9 +24,10 @@
     "xpp_maps",
     "xpp_global_class",
     "xpp_label_files",
-    "xpp_edt_base"
+    "xpp_edt_base",
+    "xpp_postload"
   ],
-  "last_run": "2026-03-20",
-  "last_title": "EDTs: Inheritance, Relations, Lookups",
+  "last_run": "2026-03-21",
+  "last_title": "postLoad, initValue & modifiedField",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

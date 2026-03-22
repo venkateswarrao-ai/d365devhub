@@ -1,5 +1,13 @@
 [
   {
+    "date": "Mar 22",
+    "tag": "LESSON",
+    "title": "insert_recordset & update_recordset",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "id": "xpp_insert_update"
+  },
+  {
     "date": "Mar 21",
     "tag": "LESSON",
     "title": "postLoad, initValue & modifiedField",

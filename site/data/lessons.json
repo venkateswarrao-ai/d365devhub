@@ -1419,5 +1419,100 @@
     },
     "generated_date": "2026-03-21",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_insert_update",
+    "title": "insert_recordset & update_recordset",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "set-based-operations",
+      "performance",
+      "sql-optimization"
+    ],
+    "summary": "Master set-based operations in X++ using insert_recordset and update_recordset for high-performance bulk data manipulation that bypasses the kernel record buffer.",
+    "content": {
+      "overview": "Set-based operations in X++ represent a fundamental shift from traditional record-by-record processing to SQL-optimized bulk operations. The insert_recordset and update_recordset statements execute directly at the database level, bypassing the application object server's record buffer and validation layers for maximum performance. These operations are essential for ETL processes, data migration scenarios, and any bulk processing where throughput matters more than individual record validation. Understanding when and how to use these statements properly can mean the difference between a process that takes hours versus minutes, making them indispensable tools for enterprise-scale D365 F&O implementations.",
+      "theory": "Set-based operations compile into direct SQL statements that execute on the database tier, completely bypassing the AOS record buffer architecture. This means no insert() or update() method calls, no validateWrite() execution, no database logging, and no RecordInsertList optimizations - just pure SQL performance. The kernel translates these statements into optimized INSERT INTO...SELECT and UPDATE...FROM constructs, leveraging the database engine's native bulk operation capabilities. However, this power comes with responsibility: you lose all table method validation, field defaults, and audit trail functionality. The DatabaseLog framework won't capture these changes, and any business logic in table methods like validateWrite(), insert(), or modifiedField() will be bypassed entirely. This makes set-based operations perfect for staging table operations, temporary calculations, and scenarios where you're working with validated data that doesn't require additional business logic execution.",
+      "code_examples": [
+        {
+          "title": "Basic insert_recordset with Joins",
+          "description": "Demonstrates copying customer data from staging to live tables with join operations and field mapping",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Bulk insert customers from staging table with enhanced data\n/// </summary>\nstatic void insertCustomersFromStaging()\n{\n    CustTable           custTable;\n    CustStagingTable    custStaging;\n    DirPartyTable       dirPartyTable;\n    LogisticsPostalAddress postalAddr;\n    \n    ttsbegin;\n    \n    try\n    {\n        // Insert customers with joined address data\n        insert_recordset custTable\n            (AccountNum, CustGroup, Currency, PaymTermId, \n             DlvMode, InvoiceAccount, PrimaryContactEmail)\n        select\n            AccountNum, CustGroup, Currency, PaymTermId,\n            DlvMode, InvoiceAccount, Email\n        from custStaging\n            exists join dirPartyTable\n                where dirPartyTable.Name == custStaging.CustomerName\n                   && dirPartyTable.PartyType == DirPartyType::Organization\n            notexists join custTable as existingCust\n                where existingCust.AccountNum == custStaging.AccountNum;\n        \n        info(strFmt(\"Inserted %1 customer records\", custStaging.rowCount()));\n        \n        ttscommit;\n    }\n    catch (Exception::Error)\n    {\n        ttsabort;\n        error(\"Failed to insert customer records: \" + infolog.text());\n        throw;\n    }\n}"
+        },
+        {
+          "title": "Complex update_recordset with Calculations",
+          "description": "Updates inventory transaction costs with calculated values from multiple related tables",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Bulk update inventory transactions with recalculated cost amounts\n/// </summary>\n/// <param name=\"_fromDate\">Start date for cost recalculation</param>\n/// <param name=\"_toDate\">End date for cost recalculation</param>\nstatic void recalculateInventoryCosts(TransDate _fromDate, TransDate _toDate)\n{\n    InventTrans         inventTrans;\n    InventSum           inventSum;\n    EcoResProduct       product;\n    InventTable         inventTable;\n    \n    ttsbegin;\n    \n    try\n    {\n        // Update cost amounts with weighted average calculation\n        update_recordset inventTrans\n        setting\n            CostAmountPosted = (inventSum.PostedQty != 0 ? \n                (inventSum.PostedValue / inventSum.PostedQty) * inventTrans.Qty : 0),\n            CostAmountAdjustment = 0,\n            CostAmountSettled = (inventSum.DeductedQty != 0 ?\n                (inventSum.DeductedValue / inventSum.DeductedQty) * abs(inventTrans.Qty) : 0)\n        where inventTrans.DatePhysical >= _fromDate\n           && inventTrans.DatePhysical <= _toDate\n           && inventTrans.StatusIssue == StatusIssue::Sold\n           && inventTrans.StatusReceipt == StatusReceipt::Purchased\n            join inventSum\n                where inventSum.ItemId == inventTrans.ItemId\n                   && inventSum.InventDimId == inventTrans.InventDimId\n                   && inventSum.PostedQty > 0\n            exists join inventTable\n                where inventTable.ItemId == inventTrans.ItemId\n                   && inventTable.ItemType == ItemType::Item\n            exists join product\n                where product.RecId == inventTable.Product\n                   && product.ProductType == EcoResProductType::Item;\n        \n        info(strFmt(\"Updated cost amounts for %1 inventory transactions\", \n                   SysQuery::countTotal(inventTrans)));\n        \n        ttscommit;\n    }\n    catch (Exception::UpdateConflict)\n    {\n        ttsabort;\n        warning(\"Update conflict detected - another process modified the data\");\n    }\n    catch (Exception::Error)\n    {\n        ttsabort;\n        error(\"Cost recalculation failed: \" + infolog.text());\n        throw;\n    }\n}"
+        },
+        {
+          "title": "Performance-Optimized Batch Processing",
+          "description": "Shows chunked processing for large datasets with progress tracking and error handling",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Process large sales order updates in chunks for memory optimization\n/// </summary>\nstatic void updateSalesOrderStatusBatch()\n{\n    SalesTable          salesTable, salesUpdate;\n    SalesLine           salesLine;\n    QueryRun            queryRun;\n    Query               query;\n    QueryBuildDataSource qbds;\n    int                 batchSize = 1000;\n    int                 processedCount = 0;\n    RecId               lastRecId = 0;\n    \n    // Build query for chunked processing\n    query = new Query();\n    qbds = query.addDataSource(tableNum(SalesTable));\n    qbds.addRange(fieldNum(SalesTable, SalesStatus))\n        .value(SysQuery::value(SalesStatus::Backorder));\n    qbds.addRange(fieldNum(SalesTable, RecId))\n        .value(SysQuery::range(lastRecId + 1, lastRecId + batchSize));\n    \n    do\n    {\n        queryRun = new QueryRun(query);\n        int currentBatchCount = 0;\n        \n        ttsbegin;\n        \n        try\n        {\n            // Update sales orders that have all lines delivered\n            update_recordset salesTable\n            setting SalesStatus = SalesStatus::Delivered,\n                    DeliveryDate = today()\n            where salesTable.SalesStatus == SalesStatus::Backorder\n               && salesTable.RecId > lastRecId\n               && salesTable.RecId <= (lastRecId + batchSize)\n                notexists join salesLine\n                    where salesLine.SalesId == salesTable.SalesId\n                       && salesLine.RemainSalesPhysical != 0;\n            \n            currentBatchCount = salesTable.rowCount();\n            processedCount += currentBatchCount;\n            \n            // Update the last processed RecId for next iteration\n            select maxof(RecId) from salesTable\n                where salesTable.RecId > lastRecId\n                   && salesTable.RecId <= (lastRecId + batchSize);\n            \n            lastRecId = salesTable.RecId;\n            \n            ttscommit;\n            \n            if (currentBatchCount > 0)\n            {\n                info(strFmt(\"Processed batch: %1 orders (Total: %2)\", \n                          currentBatchCount, processedCount));\n            }\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            error(strFmt(\"Batch processing failed at RecId %1: %2\", \n                       lastRecId, infolog.text()));\n            break;\n        }\n        \n        // Continue if we processed a full batch\n    } while (currentBatchCount > 0);\n    \n    info(strFmt(\"Completed: Updated %1 sales orders to Delivered status\", \n              processedCount));\n}"
+        }
+      ],
+      "key_points": [
+        "Set-based operations bypass the AOS record buffer and execute directly on the database, providing maximum performance for bulk operations",
+        "All table method validation, field defaults, and database logging are bypassed — use only with pre-validated data",
+        "insert_recordset supports complex joins and subqueries for sophisticated data transformation during insertion",
+        "update_recordset can perform calculations and field mappings using data from joined tables in a single statement",
+        "Proper transaction management with ttsbegin/ttscommit is critical for data consistency in large operations"
+      ],
+      "gotchas": [
+        "DatabaseLog framework doesn't capture set-based operations — implement custom audit trails if change tracking is required for compliance",
+        "Table method bypassing means no validateWrite(), insert(), or update() logic executes — defaulting, numbering, and validation must be handled externally",
+        "Lock escalation can occur on large operations — chunk processing prevents blocking other users and reduces memory pressure on the AOS"
+      ],
+      "performance_tips": [
+        "Use appropriate indexing on WHERE clause fields — set-based operations benefit dramatically from proper index utilization",
+        "Implement chunked processing for operations over 10,000 records to prevent memory issues and enable progress tracking"
+      ],
+      "related_topics": [
+        "xpp_select",
+        "xpp_batch",
+        "xpp_tables"
+      ],
+      "quiz": [
+        {
+          "q": "Which table methods are executed when using insert_recordset?",
+          "options": [
+            "insert(), validateWrite(), and defaulting methods",
+            "Only the insert() method",
+            "None - all table methods are bypassed",
+            "validateWrite() and modifiedField() only"
+          ],
+          "answer": 2,
+          "explanation": "Why C is correct: Set-based operations execute directly at the database level, completely bypassing the AOS record buffer and all associated table method logic including insert(), validateWrite(), defaulting, and field modification methods."
+        },
+        {
+          "q": "What is the primary reason to use chunked processing with set-based operations?",
+          "options": [
+            "To improve data validation accuracy",
+            "To prevent lock escalation and memory issues",
+            "To enable table method execution",
+            "To improve database logging"
+          ],
+          "answer": 1,
+          "explanation": "Why B is correct: Large set-based operations can cause lock escalation (blocking other users) and consume excessive AOS memory. Chunked processing breaks large operations into manageable pieces, preventing these issues while enabling progress tracking."
+        },
+        {
+          "q": "How does update_recordset handle field calculations from joined tables?",
+          "options": [
+            "It requires separate select statements for each calculation",
+            "Calculations are performed in the AOS and then updated",
+            "Calculations are performed directly in SQL as part of the UPDATE statement",
+            "Joined table data cannot be used in calculations"
+          ],
+          "answer": 2,
+          "explanation": "Why C is correct: update_recordset compiles into SQL UPDATE statements with JOIN clauses, allowing calculations using data from joined tables to be performed directly by the database engine in a single operation, maximizing performance."
+        }
+      ]
+    },
+    "generated_date": "2026-03-22",
+    "auto_generated": true
   }
 ]

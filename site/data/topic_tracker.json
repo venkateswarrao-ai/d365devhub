@@ -1,5 +1,5 @@
 {
-  "last_index": 15,
+  "last_index": 16,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -28,9 +28,10 @@
     "xpp_postload",
     "xpp_insert_update",
     "xpp_delete_from",
-    "xpp_optimistic_concur"
+    "xpp_optimistic_concur",
+    "ext_table_extension"
   ],
-  "last_run": "2026-03-24",
-  "last_title": "Optimistic Concurrency & Retry Logic",
+  "last_run": "2026-03-25",
+  "last_title": "Table Extensions: Add Fields & Indexes",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

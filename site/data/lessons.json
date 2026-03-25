@@ -1714,5 +1714,103 @@
     },
     "generated_date": "2026-03-24",
     "auto_generated": true
+  },
+  {
+    "id": "ext_table_extension",
+    "title": "Table Extensions: Add Fields & Indexes",
+    "section": "Extensions",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "extensions",
+      "tables",
+      "fields",
+      "indexes",
+      "aot"
+    ],
+    "summary": "Learn how to extend standard D365 F&O tables with new fields and indexes using the Extension framework, including field types, EDT usage, and index optimization strategies.",
+    "content": {
+      "overview": "Table extensions are the cornerstone of D365 F&O customization, allowing developers to add new fields and indexes to existing Microsoft tables without modifying the original objects. This overlayering-free approach maintains upgradeability while enabling business-specific data requirements. Unlike the deprecated overlayering model, table extensions create separate metadata objects that are merged at runtime, ensuring clean separation between ISV code and customizations.\n\nThe Extension framework automatically handles field ID allocation, table synchronization, and SQL schema updates. When you deploy a table extension, the D365 database synchronization process adds the new columns to the underlying SQL table and creates the necessary indexes. This seamless integration means your extended fields behave identically to standard fields in forms, reports, and data entities.\n\nTable extensions are essential for implementing industry-specific requirements, regulatory compliance fields, or integration scenarios where additional data storage is needed. They work seamlessly with Chain of Command, event handlers, and data entities, making them a powerful tool for extending D365 functionality while maintaining Microsoft's supportability guarantees.",
+      "theory": "Table extensions leverage the AOT's metadata-driven architecture to dynamically merge field definitions at compile time. The system uses the ExtensionOf attribute to establish the relationship between the extension and the base table, creating a composite view that includes both original and extended fields. The SysTableBrowser and SysDictTable classes automatically recognize extended fields, ensuring they appear in generic data access patterns.\n\nField naming in extensions follows a strict convention to prevent conflicts: field names must be prefixed with your solution's prefix (registered in LCS) or use descriptive names unlikely to collide with future Microsoft additions. The metadata compiler validates field names against reserved keywords and existing field lists across all extensions for the same table.\n\nIndex extensions require careful consideration of the underlying SQL Server optimization engine. When adding indexes to heavily-used tables like CustTable or VendTable, you must analyze existing query patterns using SQL Server's execution plans. The D365 query optimizer considers all indexes (base + extended) when generating execution plans, so poorly designed extension indexes can negatively impact standard functionality.\n\nThe field synchronization process occurs during database sync operations, managed by the SqlDataDictionary and SqlSyncEngine classes. These classes handle the translation between D365 EDT metadata and SQL Server data types, ensuring proper collation, constraints, and default values are applied. Extended fields inherit the base table's configuration for change tracking, OData exposure, and data management framework integration.",
+      "code_examples": [
+        {
+          "title": "Basic Table Extension with Various Field Types",
+          "description": "Demonstrates adding common field types to CustTable with proper EDT usage and validation attributes",
+          "language": "xpp",
+          "code": "[ExtensionOf(tableStr(CustTable))]\nfinal class CustTable_MyCompany_Extension\n{\n    // String field with EDT for consistency\n    public str getCustomerCategory()\n    {\n        return this.MyCompany_CustomerCategory;\n    }\n    \n    // Method to validate custom loyalty level\n    public boolean validateLoyaltyLevel()\n    {\n        boolean isValid = true;\n        \n        if (this.MyCompany_LoyaltyLevel < 0 || this.MyCompany_LoyaltyLevel > 100)\n        {\n            isValid = checkFailed(strFmt(\"@MyCompany:LoyaltyLevelRange\", this.AccountNum));\n        }\n        \n        return isValid;\n    }\n    \n    // Override validateField for custom validation\n    public boolean validateField(FieldId _fieldId)\n    {\n        boolean ret = super(_fieldId);\n        \n        switch (_fieldId)\n        {\n            case fieldNum(CustTable, MyCompany_LoyaltyLevel):\n                ret = this.validateLoyaltyLevel();\n                break;\n                \n            case fieldNum(CustTable, MyCompany_LastAuditDate):\n                if (this.MyCompany_LastAuditDate > today())\n                {\n                    ret = checkFailed(\"@MyCompany:FutureDateError\");\n                }\n                break;\n        }\n        \n        return ret;\n    }\n}"
+        },
+        {
+          "title": "Complex Extension with Custom Index and Find Method",
+          "description": "Shows how to add an optimized index and corresponding static find method for performance-critical scenarios",
+          "language": "xpp",
+          "code": "[ExtensionOf(tableStr(VendTable))]\nfinal class VendTable_MyCompany_Extension\n{\n    // Static find method leveraging the custom index\n    public static VendTable findByTaxIdAndRegion(TaxIdNum _taxId, \n                                                  str _region,\n                                                  boolean _forUpdate = false)\n    {\n        VendTable vendTable;\n        \n        if (!_taxId || !_region)\n        {\n            return vendTable;\n        }\n        \n        // Use the custom index for optimal performance\n        select firstonly vendTable\n            index MyCompany_TaxRegionIdx\n            where vendTable.MyCompany_TaxRegistrationNum == _taxId\n               && vendTable.MyCompany_BusinessRegion == _region;\n               \n        return vendTable;\n    }\n    \n    // Method to update region-specific compliance data\n    public void updateComplianceInfo(str _region, \n                                    utcdatetime _lastVerified)\n    {\n        ttsbegin;\n        \n        try\n        {\n            this.MyCompany_BusinessRegion = _region;\n            this.MyCompany_LastComplianceCheck = _lastVerified;\n            this.MyCompany_ComplianceStatus = MyCompanyComplianceStatus::Verified;\n            \n            // Use doUpdate instead of update for better performance in loops\n            this.doUpdate();\n            \n            info(strFmt(\"Compliance updated for vendor %1\", this.AccountNum));\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            error(strFmt(\"Failed to update compliance for vendor %1\", this.AccountNum));\n            throw;\n        }\n        \n        ttscommit;\n    }\n    \n    // Display method for form usage\n    display MyCompanyComplianceStatusDisplay complianceDisplay()\n    {\n        switch (this.MyCompany_ComplianceStatus)\n        {\n            case MyCompanyComplianceStatus::Verified:\n                return \"✓ Compliant\";\n            case MyCompanyComplianceStatus::Pending:\n                return \"⏳ Under Review\";\n            case MyCompanyComplianceStatus::Failed:\n                return \"❌ Non-Compliant\";\n            default:\n                return \"❓ Unknown\";\n        }\n    }\n}"
+        },
+        {
+          "title": "Advanced Extension with Calculated Field and Event Handler",
+          "description": "Implements a calculated field using display methods and event handlers for real-time data updates",
+          "language": "xpp",
+          "code": "[ExtensionOf(tableStr(InventTable))]\nfinal class InventTable_MyCompany_Extension\n{\n    // Display method for calculated profitability score\n    display MyCompanyProfitabilityScore profitabilityScore()\n    {\n        InventTableModule inventTableModule;\n        CostPrice avgCostPrice;\n        SalesPrice avgSalesPrice;\n        real profitMargin;\n        \n        // Get average cost from inventory module\n        select firstonly inventTableModule\n            where inventTableModule.ItemId == this.ItemId\n               && inventTableModule.ModuleType == ModuleInventPurchSales::Invent;\n               \n        if (!inventTableModule)\n        {\n            return 0;\n        }\n        \n        avgCostPrice = inventTableModule.CostPrice;\n        \n        // Get sales price from sales module\n        select firstonly inventTableModule\n            where inventTableModule.ItemId == this.ItemId\n               && inventTableModule.ModuleType == ModuleInventPurchSales::Sales;\n               \n        if (!inventTableModule || !avgCostPrice)\n        {\n            return 0;\n        }\n        \n        avgSalesPrice = inventTableModule.Price;\n        profitMargin = ((avgSalesPrice - avgCostPrice) / avgSalesPrice) * 100;\n        \n        // Return score from 0-100\n        return max(0, min(100, profitMargin));\n    }\n    \n    // Event handler to update profitability when cost changes\n    [DataEventHandler(tableStr(InventTableModule), DataEventType::Updated)]\n    public static void InventTableModule_onUpdated(Common _sender, \n                                                   DataEventArgs _e)\n    {\n        InventTableModule inventTableModule = _sender as InventTableModule;\n        InventTable inventTable;\n        \n        if (!inventTableModule)\n        {\n            return;\n        }\n        \n        // Update our cached profitability timestamp for UI refresh\n        update_recordset inventTable\n            setting MyCompany_LastProfitabilityCalc = DateTimeUtil::utcNow()\n            where inventTable.ItemId == inventTableModule.ItemId;\n    }\n    \n    // Method to bulk update profitability cache\n    public static void updateProfitabilityCache(container _itemIds = conNull())\n    {\n        InventTable inventTable;\n        Query query;\n        QueryRun queryRun;\n        QueryBuildDataSource qbds;\n        int recordsProcessed = 0;\n        \n        query = new Query();\n        qbds = query.addDataSource(tableNum(InventTable));\n        \n        if (_itemIds != conNull())\n        {\n            qbds.addRange(fieldNum(InventTable, ItemId)).value(con2StrUnlimited(_itemIds));\n        }\n        \n        queryRun = new QueryRun(query);\n        \n        ttsbegin;\n        \n        while (queryRun.next())\n        {\n            inventTable = queryRun.get(tableNum(InventTable));\n            inventTable.MyCompany_LastProfitabilityCalc = DateTimeUtil::utcNow();\n            inventTable.doUpdate();\n            recordsProcessed++;\n            \n            if (recordsProcessed % 1000 == 0)\n            {\n                info(strFmt(\"%1 items processed\", recordsProcessed));\n            }\n        }\n        \n        ttscommit;\n        \n        info(strFmt(\"Profitability cache updated for %1 items\", recordsProcessed));\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Always use EDTs (Extended Data Types) for new fields to ensure consistency, validation, and label management across the application",
+        "Table extension field names must include your solution prefix to avoid conflicts with future Microsoft updates and other ISV solutions",
+        "Index extensions should be analyzed for performance impact — use SQL Server execution plans to validate that new indexes improve rather than degrade query performance",
+        "Field validation belongs in validateField() method override, not in modifiedField() — this ensures validation occurs during all data modification scenarios",
+        "Display methods in table extensions automatically appear in form design and can be used for calculated fields that don't require database storage"
+      ],
+      "gotchas": [
+        "Field IDs are automatically managed, but manually specifying field IDs can cause conflicts — let the system auto-assign field IDs to ensure uniqueness across environments",
+        "Adding non-nullable fields to tables with existing data requires default values or the database sync will fail — always consider the upgrade path for production systems",
+        "Index key length limitations apply to extended indexes — SQL Server has a 900-byte limit for index keys, which affects composite indexes with multiple string fields"
+      ],
+      "performance_tips": [
+        "Place most selective fields first in composite indexes to maximize index effectiveness — SQL Server uses index statistics to optimize query execution plans",
+        "Use covering indexes (include columns) for frequently accessed fields that aren't part of the key to reduce key lookup operations and improve query performance"
+      ],
+      "related_topics": [
+        "xpp_coc",
+        "xpp_tables",
+        "data_entities",
+        "form_extensions"
+      ],
+      "quiz": [
+        {
+          "q": "What is the correct way to reference a field added through table extension in X++ code?",
+          "options": [
+            "this.MyExtensionField",
+            "this.fieldNum(MyExtensionField)",
+            "fieldNum(BaseTable, MyExtensionField)",
+            "this.MyCompany_ExtensionField"
+          ],
+          "answer": 3,
+          "explanation": "Why D is correct: Table extension fields must include your solution prefix to avoid naming conflicts. The field is accessed like any standard field using dot notation with the prefixed field name."
+        },
+        {
+          "q": "When adding a new index to a table extension, what should be your primary consideration?",
+          "options": [
+            "Index name must match the table name",
+            "Impact on existing query performance",
+            "Index must include all table fields",
+            "Index order doesn't matter for performance"
+          ],
+          "answer": 1,
+          "explanation": "Why B is correct: New indexes can negatively impact existing queries if not properly designed. You must analyze SQL execution plans to ensure the index improves performance for your scenarios without degrading existing functionality."
+        },
+        {
+          "q": "Which method should you override in a table extension to implement custom field validation?",
+          "options": [
+            "modifiedField()",
+            "validateField()",
+            "insert()",
+            "initValue()"
+          ],
+          "answer": 1,
+          "explanation": "Why B is correct: validateField() is called during all data modification operations (insert, update, delete) and is the proper place for field validation logic. modifiedField() only executes during interactive form changes."
+        }
+      ]
+    },
+    "generated_date": "2026-03-25",
+    "auto_generated": true
   }
 ]

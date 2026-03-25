@@ -1,5 +1,13 @@
 [
   {
+    "date": "Mar 25",
+    "tag": "LESSON",
+    "title": "Table Extensions: Add Fields & Indexes",
+    "section": "Extensions",
+    "level": "Intermediate",
+    "id": "ext_table_extension"
+  },
+  {
     "date": "Mar 24",
     "tag": "LESSON",
     "title": "Optimistic Concurrency & Retry Logic",

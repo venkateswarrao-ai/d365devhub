@@ -1,5 +1,13 @@
 [
   {
+    "date": "Mar 29",
+    "tag": "LESSON",
+    "title": "Query Extensions & Data Range Filters",
+    "section": "Extensions",
+    "level": "Intermediate",
+    "id": "ext_query_extension"
+  },
+  {
     "date": "Mar 28",
     "tag": "LESSON",
     "title": "Enum Extensions: Add Values Safely",

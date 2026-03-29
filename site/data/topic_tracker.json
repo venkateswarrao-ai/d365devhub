@@ -1,5 +1,5 @@
 {
-  "last_index": 19,
+  "last_index": 20,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -32,9 +32,10 @@
     "ext_table_extension",
     "ext_form_datasource",
     "ext_menu_items",
-    "ext_enum_extension"
+    "ext_enum_extension",
+    "ext_query_extension"
   ],
-  "last_run": "2026-03-28",
-  "last_title": "Enum Extensions: Add Values Safely",
+  "last_run": "2026-03-29",
+  "last_title": "Query Extensions & Data Range Filters",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

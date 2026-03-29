@@ -2090,5 +2090,102 @@
     },
     "generated_date": "2026-03-28",
     "auto_generated": true
+  },
+  {
+    "id": "ext_query_extension",
+    "title": "Query Extensions & Data Range Filters",
+    "section": "Extensions",
+    "level": "Intermediate",
+    "duration": "18 min read",
+    "tags": [
+      "query",
+      "extensions",
+      "ranges",
+      "filters",
+      "performance"
+    ],
+    "summary": "Learn how to extend D365 F&O queries through query extension methods, custom data range filters, and advanced filtering patterns for forms and reports.",
+    "content": {
+      "overview": "Query extensions in D365 F&O provide a powerful mechanism to customize data retrieval logic without modifying base query objects. Unlike Chain of Command (CoC) which intercepts method calls, query extensions allow you to inject custom ranges, modify data sources, and implement complex filtering scenarios that extend beyond standard query capabilities. This pattern is essential for ISV solutions, localization requirements, and complex business scenarios where standard query ranges are insufficient.\n\nThe D365 F&O query framework supports extension through the SysQueryRangeUtil class and custom query range provider patterns. These extensions execute during query compilation and can dynamically add ranges based on runtime conditions, user context, or complex business logic. Understanding query extensions is crucial for developers working on reporting solutions, form customizations, and data export scenarios where standard filtering mechanisms fall short.\n\nQuery extensions become particularly valuable when dealing with multi-company scenarios, date-effective filtering, complex calculated ranges, or security-driven data access patterns. They integrate seamlessly with the Query Object Model (QOM) and maintain full compatibility with existing reports, forms, and batch jobs that consume the extended queries.",
+      "theory": "D365 F&O's query extension architecture revolves around the SysQuery framework and the QueryRun class hierarchy. When a query executes, the system invokes registered query extension methods during the query.pack() and query.run() lifecycle. Extensions typically implement the SysQueryRangeUtil::getRanges() pattern or register custom providers through the SysQueryExtensions framework.\n\nThe core mechanism relies on the Query.addDataSource() and QueryBuildRange.value() APIs, combined with the SysQueryValue enumeration for dynamic range types. Extension methods receive a QueryBuildDataSource parameter and can programmatically add ranges, modify join conditions, or inject calculated fields. The framework supports both design-time extensions (through AOT query objects) and runtime extensions (through code-based providers).\n\nQuery extensions execute in a specific order: base query ranges first, then registered extensions by priority, finally user-defined ranges from forms or reports. This layered approach ensures predictable behavior while maintaining extensibility. The SysQueryRangeUtil class provides helper methods for common scenarios like date ranges (dateRange(), yearRange()), company filtering (currentUserCompany()), and security-based access (currentUserId()). Advanced scenarios can implement custom SysQueryValue providers for complex calculated ranges that evaluate at runtime rather than query compilation time.",
+      "code_examples": [
+        {
+          "title": "Basic Query Extension with Date Range Filter",
+          "description": "Demonstrates how to create a query extension that adds dynamic date ranges based on user preferences",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Query extension for SalesTable that adds dynamic date filtering\n/// </summary>\nfinal class SalesTableQueryExtension\n{\n    [SysQueryExtension('SalesTable')]\n    public static void extendSalesTableQuery(Query _query)\n    {\n        QueryBuildDataSource    qbdsSalesTable;\n        QueryBuildRange         qbrCreatedDate, qbrStatus;\n        UserParameters          userParams;\n        \n        try\n        {\n            qbdsSalesTable = _query.dataSourceTable(tableNum(SalesTable));\n            \n            if (!qbdsSalesTable)\n            {\n                return;\n            }\n            \n            userParams = UserParameters::find();\n            \n            // Add date range filter based on user preference\n            if (userParams.SalesOrderDateFilter != NoYes::No)\n            {\n                qbrCreatedDate = qbdsSalesTable.addRange(fieldNum(SalesTable, CreatedDate));\n                \n                switch (userParams.DateRangeType)\n                {\n                    case DateRangeType::LastWeek:\n                        qbrCreatedDate.value(SysQueryRangeUtil::dateRange(-7, 0));\n                        break;\n                        \n                    case DateRangeType::LastMonth:\n                        qbrCreatedDate.value(SysQueryRangeUtil::dateRange(-30, 0));\n                        break;\n                        \n                    case DateRangeType::CurrentYear:\n                        qbrCreatedDate.value(SysQueryRangeUtil::yearRange(0));\n                        break;\n                        \n                    default:\n                        qbrCreatedDate.value(SysQueryRangeUtil::dateRange(-30, 0));\n                        break;\n                }\n            }\n            \n            // Add security-based status filtering\n            if (!SecurityRights::constructByAOT(menuItemActionStr(SalesTableListPagePreProcessing)).isAccessGranted())\n            {\n                qbrStatus = qbdsSalesTable.addRange(fieldNum(SalesTable, SalesStatus));\n                qbrStatus.value(SysQuery::valueNot([SalesStatus::Canceled, SalesStatus::Invoiced]));\n            }\n            \n            info(strFmt(\"Applied query extension to %1 with %2 ranges\", \n                       qbdsSalesTable.name(), qbdsSalesTable.rangeCount()));\n        }\n        catch (Exception::Error)\n        {\n            error(\"Failed to apply SalesTable query extension: \" + infolog.text());\n        }\n    }\n}"
+        },
+        {
+          "title": "Advanced Query Extension with Custom Range Provider",
+          "description": "Shows how to implement a custom range provider for complex calculated filters and multi-table scenarios",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Advanced query extension with custom range provider for inventory transactions\n/// </summary>\nfinal class InventTransQueryExtension\n{\n    [SysQueryExtension('InventTrans')]\n    public static void extendInventTransQuery(Query _query)\n    {\n        QueryBuildDataSource    qbdsInventTrans, qbdsInventDim;\n        QueryBuildRange         qbrCustomRange;\n        \n        try\n        {\n            qbdsInventTrans = _query.dataSourceTable(tableNum(InventTrans));\n            \n            if (!qbdsInventTrans)\n            {\n                return;\n            }\n            \n            // Add InventDim data source if not present\n            qbdsInventDim = qbdsInventTrans.findDataSource(tableNum(InventDim));\n            if (!qbdsInventDim)\n            {\n                qbdsInventDim = qbdsInventTrans.addDataSource(tableNum(InventDim));\n                qbdsInventDim.relations(true);\n                qbdsInventDim.joinMode(JoinMode::InnerJoin);\n                qbdsInventDim.addLink(fieldNum(InventTrans, InventDimId), \n                                     fieldNum(InventDim, inventDimId));\n            }\n            \n            // Apply warehouse-based filtering using custom provider\n            qbrCustomRange = qbdsInventDim.addRange(fieldNum(InventDim, InventLocationId));\n            qbrCustomRange.value(InventTransQueryExtension::getWarehouseFilter());\n            qbrCustomRange.status(RangeStatus::Locked);\n            \n            // Add financial dimension filtering if enabled\n            if (DimensionParameters::find().EnableInventTransDimFilter)\n            {\n                InventTransQueryExtension::addDimensionRanges(qbdsInventTrans);\n            }\n            \n            info(strFmt(\"Extended InventTrans query with %1 data sources\", \n                       _query.dataSourceCount()));\n        }\n        catch (Exception::Error)\n        {\n            error(\"InventTrans query extension failed: \" + infolog.text());\n        }\n    }\n    \n    /// <summary>\n    /// Custom range provider for warehouse filtering\n    /// </summary>\n    private static str getWarehouseFilter()\n    {\n        List                warehouseList;\n        ListEnumerator      le;\n        str                 rangeValue;\n        InventLocation      inventLocation;\n        \n        warehouseList = new List(Types::String);\n        \n        // Get user-accessible warehouses based on security\n        while select InventLocationId from inventLocation\n            where inventLocation.InventLocationStatus == InventLocationStatus::Active\n               && inventLocation.DataAreaId == curext()\n        {\n            if (InventLocation::checkWarehouseAccess(inventLocation.InventLocationId))\n            {\n                warehouseList.addEnd(inventLocation.InventLocationId);\n            }\n        }\n        \n        // Build range string\n        if (warehouseList.elements() == 0)\n        {\n            return SysQuery::valueEmptyString();\n        }\n        else if (warehouseList.elements() == 1)\n        {\n            return warehouseList.firstValue();\n        }\n        else\n        {\n            rangeValue = '';\n            le = warehouseList.getEnumerator();\n            \n            while (le.moveNext())\n            {\n                if (rangeValue != '')\n                {\n                    rangeValue += ',';\n                }\n                rangeValue += le.current();\n            }\n            \n            return SysQuery::valueIn(rangeValue);\n        }\n    }\n    \n    /// <summary>\n    /// Add financial dimension ranges to the query\n    /// </summary>\n    private static void addDimensionRanges(QueryBuildDataSource _qbdsInventTrans)\n    {\n        QueryBuildDataSource    qbdsDimAttrValueSet;\n        QueryBuildRange         qbrDimension;\n        DimensionAttribute      dimAttribute;\n        \n        // Add dimension attribute value set join\n        qbdsDimAttrValueSet = _qbdsInventTrans.addDataSource(tableNum(DimensionAttributeValueSet));\n        qbdsDimAttrValueSet.joinMode(JoinMode::ExistsJoin);\n        qbdsDimAttrValueSet.addLink(fieldNum(InventTrans, DefaultDimension),\n                                   fieldNum(DimensionAttributeValueSet, DimensionAttributeValueSet));\n        \n        // Apply department filter if configured\n        dimAttribute = DimensionAttribute::findByName(DimensionParameters::find().DepartmentDimension);\n        if (dimAttribute.RecId != 0)\n        {\n            qbrDimension = qbdsDimAttrValueSet.addRange(fieldNum(DimensionAttributeValueSet, DisplayValue));\n            qbrDimension.value(UserParameters::find().DefaultDepartment);\n        }\n    }\n}"
+        },
+        {
+          "title": "Form Query Extension with Runtime Context",
+          "description": "Demonstrates how to extend form queries with context-sensitive filtering based on form parameters",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Form-specific query extension that adapts based on form context\n/// </summary>\nfinal class CustTableFormQueryExtension\n{\n    [FormDataSourceEventHandler(formDataSourceStr(CustTableListPage, CustTable), \n                               FormDataSourceEventType::QueryExecuted)]\n    public static void CustTable_OnQueryExecuted(FormDataSource _sender, FormDataSourceEventArgs _e)\n    {\n        FormRun                 formRun;\n        QueryBuildDataSource    qbdsCustTable;\n        QueryBuildRange         qbrCustGroup, qbrCreditLimit;\n        CustParameters          custParameters;\n        \n        try\n        {\n            formRun = _sender.formRun();\n            \n            if (!formRun || !formRun.args())\n            {\n                return;\n            }\n            \n            qbdsCustTable = _sender.query().dataSourceTable(tableNum(CustTable));\n            \n            if (!qbdsCustTable)\n            {\n                return;\n            }\n            \n            custParameters = CustParameters::find();\n            \n            // Apply context-based filtering\n            switch (formRun.args().menuItemName())\n            {\n                case menuItemDisplayStr(CustTableListPageHighRisk):\n                    CustTableFormQueryExtension::applyHighRiskFilter(qbdsCustTable, custParameters);\n                    break;\n                    \n                case menuItemDisplayStr(CustTableListPageActiveOnly):\n                    CustTableFormQueryExtension::applyActiveCustomerFilter(qbdsCustTable);\n                    break;\n                    \n                case menuItemDisplayStr(CustTableListPageByGroup):\n                    if (formRun.args().parm() != '')\n                    {\n                        qbrCustGroup = qbdsCustTable.addRange(fieldNum(CustTable, CustGroup));\n                        qbrCustGroup.value(formRun.args().parm());\n                        qbrCustGroup.status(RangeStatus::Locked);\n                    }\n                    break;\n                    \n                default:\n                    // Apply default company-specific filters\n                    CustTableFormQueryExtension::applyDefaultFilters(qbdsCustTable);\n                    break;\n            }\n            \n            info(strFmt(\"Applied context-sensitive filters for %1\", formRun.args().menuItemName()));\n        }\n        catch (Exception::Error)\n        {\n            warning(\"Failed to apply customer form query extension: \" + infolog.text());\n        }\n    }\n    \n    /// <summary>\n    /// Apply high-risk customer filtering\n    /// </summary>\n    private static void applyHighRiskFilter(QueryBuildDataSource _qbdsCustTable, CustParameters _custParameters)\n    {\n        QueryBuildRange     qbrCreditLimit, qbrBlocked;\n        \n        // Filter by credit limit threshold\n        if (_custParameters.HighRiskCreditLimit != 0)\n        {\n            qbrCreditLimit = _qbdsCustTable.addRange(fieldNum(CustTable, CreditMax));\n            qbrCreditLimit.value(SysQuery::range(0, _custParameters.HighRiskCreditLimit));\n        }\n        \n        // Include only non-blocked customers or specific block types\n        qbrBlocked = _qbdsCustTable.addRange(fieldNum(CustTable, Blocked));\n        qbrBlocked.value(SysQuery::valueIn([CustVendorBlocked::No, CustVendorBlocked::Invoice]));\n    }\n    \n    /// <summary>\n    /// Apply active customer filtering\n    /// </summary>\n    private static void applyActiveCustomerFilter(QueryBuildDataSource _qbdsCustTable)\n    {\n        QueryBuildDataSource    qbdsCustTrans;\n        QueryBuildRange         qbrTransDate;\n        \n        // Add CustTrans data source to filter by recent activity\n        qbdsCustTrans = _qbdsCustTable.addDataSource(tableNum(CustTrans));\n        qbdsCustTrans.joinMode(JoinMode::ExistsJoin);\n        qbdsCustTrans.relations(true);\n        \n        // Filter transactions within last 12 months\n        qbrTransDate = qbdsCustTrans.addRange(fieldNum(CustTrans, TransDate));\n        qbrTransDate.value(SysQueryRangeUtil::dateRange(-365, 0));\n    }\n    \n    /// <summary>\n    /// Apply default company-specific filters\n    /// </summary>\n    private static void applyDefaultFilters(QueryBuildDataSource _qbdsCustTable)\n    {\n        CompanyInfo         companyInfo;\n        QueryBuildRange     qbrCurrency;\n        \n        companyInfo = CompanyInfo::find();\n        \n        // Apply default currency filter for single-currency companies\n        if (companyInfo.DefaultCurrency != '' && !companyInfo.MultipleCurrencyEnabled)\n        {\n            qbrCurrency = _qbdsCustTable.addRange(fieldNum(CustTable, Currency));\n            qbrCurrency.value(companyInfo.DefaultCurrency);\n        }\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Query extensions execute during query compilation and can dynamically modify data sources, ranges, and join conditions without touching base query objects",
+        "Use SysQueryRangeUtil helper methods for common scenarios like dateRange(), yearRange(), and currentUserId() to ensure consistent behavior across extensions",
+        "Extensions registered with [SysQueryExtension] attribute are applied automatically, while form-specific extensions use FormDataSourceEventHandler patterns",
+        "Lock range status with RangeStatus::Locked to prevent user modification of security-critical filters applied through extensions",
+        "Query extensions support both design-time (AOT-based) and runtime (code-based) scenarios, with runtime extensions taking precedence during execution"
+      ],
+      "gotchas": [
+        "Query extensions execute for ALL consumers of the query — adding a range in an extension affects forms, reports, and batch jobs using that query, potentially breaking existing functionality",
+        "Range values must use proper SysQuery formatting (valueIn(), valueNot(), range()) — direct string concatenation can cause SQL injection vulnerabilities or malformed WHERE clauses",
+        "Extension methods are static and cannot access instance data — use global functions or parameter passing patterns to provide context-specific filtering logic"
+      ],
+      "performance_tips": [
+        "Apply most selective ranges first in extensions to optimize SQL execution plans — database engines typically process WHERE clauses in the order they appear",
+        "Use ExistsJoin instead of InnerJoin when adding data sources purely for filtering to avoid unnecessary data retrieval and potential duplicate rows"
+      ],
+      "related_topics": [
+        "xpp_select",
+        "xpp_coc",
+        "xpp_security"
+      ],
+      "quiz": [
+        {
+          "q": "What is the correct way to add a date range filter in a query extension that covers the last 30 days?",
+          "options": [
+            "qbr.value('..\" + (today()-30) + \"');\n",
+            "qbr.value(SysQueryRangeUtil::dateRange(-30, 0));",
+            "qbr.value(today()-30 + '...' + today());",
+            "qbr.value(SysQuery::range(today()-30, today()));"
+          ],
+          "answer": 1,
+          "explanation": "SysQueryRangeUtil::dateRange(-30, 0) is the correct pattern as it uses the framework's standardized date range formatting and handles timezone/locale considerations automatically."
+        },
+        {
+          "q": "When should you use RangeStatus::Locked on a query extension range?",
+          "options": [
+            "Always, to ensure the range cannot be modified",
+            "Never, as it prevents user filtering capabilities",
+            "Only when the range contains security-sensitive filters",
+            "Only when the range uses complex SQL expressions"
+          ],
+          "answer": 2,
+          "explanation": "RangeStatus::Locked should be used specifically for security-sensitive filters to prevent users from bypassing security restrictions by modifying or removing the range."
+        },
+        {
+          "q": "What happens when multiple query extensions are registered for the same query?",
+          "options": [
+            "Only the first extension executes",
+            "All extensions execute in registration order",
+            "The system throws a compilation error",
+            "Extensions execute in alphabetical order by class name"
+          ],
+          "answer": 1,
+          "explanation": "All registered query extensions execute in their registration order during query compilation, allowing multiple extensions to layer additional filtering logic on the same query."
+        }
+      ]
+    },
+    "generated_date": "2026-03-29",
+    "auto_generated": true
   }
 ]

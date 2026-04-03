@@ -1,1 +1,1 @@
-DIXF Custom Data Entities
+Composite Data Entities

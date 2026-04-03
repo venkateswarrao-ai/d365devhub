@@ -1,5 +1,13 @@
 [
   {
+    "date": "Apr 03",
+    "tag": "LESSON",
+    "title": "Composite Data Entities",
+    "section": "Data Model",
+    "level": "Expert",
+    "id": "data_composite_entity"
+  },
+  {
     "date": "Apr 02",
     "tag": "LESSON",
     "title": "DIXF Custom Data Entities",
@@ -225,13 +233,6 @@
     "tag": "LESSON",
     "title": "Security: Roles, Duties, XDS & SOD",
     "section": "Configuration",
-    "level": "Expert"
-  },
-  {
-    "date": "Mar 02",
-    "tag": "LESSON",
-    "title": "Workflow Framework",
-    "section": "Batch & Workflow",
     "level": "Expert"
   }
 ]

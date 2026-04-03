@@ -2570,5 +2570,100 @@
     },
     "generated_date": "2026-04-02",
     "auto_generated": true
+  },
+  {
+    "id": "data_composite_entity",
+    "title": "Composite Data Entities",
+    "section": "Data Model",
+    "level": "Expert",
+    "duration": "25 min read",
+    "tags": [
+      "composite-entities",
+      "data-management",
+      "odata",
+      "data-export",
+      "performance"
+    ],
+    "summary": "Master composite data entities for complex data relationships, including nested collections, performance optimization, and proper staging table management in D365 F&O.",
+    "content": {
+      "overview": "Composite data entities represent the pinnacle of D365 F&O's data management framework, enabling hierarchical data structures with nested collections that mirror real business processes. Unlike standard data entities that handle flat table structures, composite entities manage parent-child relationships with proper transactional integrity, making them essential for complex integrations like multi-line orders, financial journals with distributions, or product configurations with variants. They leverage the DMF (Data Management Framework) staging architecture while providing OData endpoints that support nested JSON payloads, enabling sophisticated API integrations that would otherwise require multiple round-trips and complex state management.",
+      "theory": "Composite data entities extend the standard DataEntityView framework by implementing nested collections through the CompositeDataEntityNode attribute and specialized staging table patterns. The framework uses a two-phase staging approach: first materializing parent records in the primary staging table, then processing child collections through related staging tables linked by DataAreaId and DefinitionGroup. The SysCompositeDataEntity class orchestrates this process, managing the EntityCollectionProperty attributes that define nested relationships and ensuring proper sequencing during import/export operations. Performance is critical since composite entities can generate exponential staging record counts - a sales order with 10 lines and 3 charges per line creates 40 staging records (1 header + 10 lines + 30 charges). The framework handles this through batched processing in the DMFEntityWriter and DMFEntityReader classes, but developers must carefully design composite structures to avoid staging table bloat and memory pressure during large data operations.",
+      "code_examples": [
+        {
+          "title": "Customer Composite Entity with Address Collections",
+          "description": "Complete composite entity implementing customer master data with nested address and contact collections, demonstrating proper staging table relationships and OData serialization",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Composite entity for customer with nested address collections\n/// </summary>\n[DataEntityView,\n DataContractAttribute,\n CompositeDataEntityNode(tableStr(CustTable))]\nfinal class DEV_CustomerCompositeEntity extends DataEntityView\n{\n    // Primary entity fields from CustTable\n    CustAccount         AccountNum;\n    CustName            Name;\n    CustGroupId         CustGroup;\n    \n    // Nested collection properties\n    [EntityCollectionProperty(Types::Class, classStr(DEV_CustomerAddressEntity))]\n    List                CustomerAddresses;\n    \n    [EntityCollectionProperty(Types::Class, classStr(DEV_CustomerContactEntity))]\n    List                CustomerContacts;\n    \n    /// <summary>\n    /// Initialize the composite structure\n    /// </summary>\n    public void new()\n    {\n        super();\n        this.CustomerAddresses = new List(Types::Class);\n        this.CustomerContacts = new List(Types::Class);\n    }\n    \n    /// <summary>\n    /// Custom serialization for nested collections\n    /// </summary>\n    public void serialize(DataContainerSerializer _serializer)\n    {\n        this.serializeEntity(_serializer);\n        \n        // Serialize nested address collection\n        if (this.CustomerAddresses && !this.CustomerAddresses.empty())\n        {\n            List addressList = new List(Types::Class);\n            ListEnumerator addressEnum = this.CustomerAddresses.getEnumerator();\n            \n            while (addressEnum.moveNext())\n            {\n                DEV_CustomerAddressEntity addressEntity = addressEnum.current();\n                addressList.addEnd(addressEntity);\n            }\n            \n            _serializer.serialize(fieldStr(DEV_CustomerCompositeEntity, CustomerAddresses), addressList);\n        }\n        \n        // Serialize nested contact collection\n        if (this.CustomerContacts && !this.CustomerContacts.empty())\n        {\n            List contactList = new List(Types::Class);\n            ListEnumerator contactEnum = this.CustomerContacts.getEnumerator();\n            \n            while (contactEnum.moveNext())\n            {\n                DEV_CustomerContactEntity contactEntity = contactEnum.current();\n                contactList.addEnd(contactEntity);\n            }\n            \n            _serializer.serialize(fieldStr(DEV_CustomerCompositeEntity, CustomerContacts), contactList);\n        }\n    }\n    \n    /// <summary>\n    /// Map from staging tables during import\n    /// </summary>\n    public void mapEntityToDataSource(DataEntityRuntimeContext _entityCtx)\n    {\n        super(_entityCtx);\n        \n        // Load child collections from staging\n        this.loadAddressCollection(_entityCtx);\n        this.loadContactCollection(_entityCtx);\n    }\n    \n    /// <summary>\n    /// Load address collection from staging table\n    /// </summary>\n    private void loadAddressCollection(DataEntityRuntimeContext _entityCtx)\n    {\n        DEV_CustomerAddressEntityStaging addressStaging;\n        DEV_CustomerAddressEntity addressEntity;\n        \n        this.CustomerAddresses = new List(Types::Class);\n        \n        select * from addressStaging\n            where addressStaging.DataAreaId == _entityCtx.getDMFDefinitionGroupExecution().DataAreaId\n               && addressStaging.DefinitionGroup == _entityCtx.getDMFDefinitionGroupExecution().DefinitionGroup\n               && addressStaging.ParentAccountNum == this.AccountNum;\n        \n        while (select addressStaging)\n        {\n            addressEntity = new DEV_CustomerAddressEntity();\n            addressEntity.initFromStagingTable(addressStaging);\n            this.CustomerAddresses.addEnd(addressEntity);\n            \n            next addressStaging;\n        }\n    }\n    \n    /// <summary>\n    /// Load contact collection from staging table\n    /// </summary>\n    private void loadContactCollection(DataEntityRuntimeContext _entityCtx)\n    {\n        DEV_CustomerContactEntityStaging contactStaging;\n        DEV_CustomerContactEntity contactEntity;\n        \n        this.CustomerContacts = new List(Types::Class);\n        \n        select * from contactStaging\n            where contactStaging.DataAreaId == _entityCtx.getDMFDefinitionGroupExecution().DataAreaId\n               && contactStaging.DefinitionGroup == _entityCtx.getDMFDefinitionGroupExecution().DefinitionGroup\n               && contactStaging.ParentAccountNum == this.AccountNum;\n        \n        while (select contactStaging)\n        {\n            contactEntity = new DEV_CustomerContactEntity();\n            contactEntity.initFromStagingTable(contactStaging);\n            this.CustomerContacts.addEnd(contactEntity);\n            \n            next contactStaging;\n        }\n    }\n}"
+        },
+        {
+          "title": "Sales Order Composite with Line Processing",
+          "description": "Advanced composite entity handling sales order headers with lines and charges, demonstrating transactional integrity and staging table optimization patterns",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Sales order composite entity with optimized staging processing\n/// </summary>\n[DataEntityView,\n DataContractAttribute,\n CompositeDataEntityNode(tableStr(SalesTable))]\nfinal class DEV_SalesOrderCompositeEntity extends DataEntityView\n{\n    // Sales header fields\n    SalesId             SalesId;\n    CustAccount         CustAccount;\n    SalesName           SalesName;\n    TransDate           OrderDate;\n    \n    // Nested collections with proper typing\n    [EntityCollectionProperty(Types::Class, classStr(DEV_SalesLineEntity))]\n    List                SalesLines;\n    \n    [EntityCollectionProperty(Types::Class, classStr(DEV_SalesChargeEntity))]\n    List                SalesCharges;\n    \n    /// <summary>\n    /// Optimized data source processing with proper transaction scope\n    /// </summary>\n    public void persistEntity(DataEntityRuntimeContext _entityCtx)\n    {\n        SalesTable          salesTable;\n        SalesLine           salesLine;\n        MarkupTrans         markupTrans;\n        NumberSeq           numberSeq;\n        \n        try\n        {\n            ttsbegin;\n            \n            // Create header record with proper number sequence\n            if (!this.SalesId)\n            {\n                numberSeq = NumberSeq::newGetNumFromCode(SalesParameters::numRefSalesId().NumberSequenceCode);\n                this.SalesId = numberSeq.num();\n            }\n            \n            select forupdate salesTable\n                where salesTable.SalesId == this.SalesId;\n            \n            if (!salesTable.RecId)\n            {\n                salesTable.clear();\n                salesTable.initValue();\n                salesTable.SalesId = this.SalesId;\n            }\n            \n            // Map header fields\n            salesTable.CustAccount = this.CustAccount;\n            salesTable.SalesName = this.SalesName;\n            salesTable.OrderDate = this.OrderDate;\n            \n            // Validate and insert/update header\n            if (!salesTable.validateWrite())\n            {\n                throw error(\"Sales order header validation failed\");\n            }\n            \n            if (salesTable.RecId)\n                salesTable.update();\n            else\n                salesTable.insert();\n            \n            // Process lines collection with proper line numbering\n            this.processSalesLines(salesTable, _entityCtx);\n            \n            // Process charges collection\n            this.processSalesCharges(salesTable, _entityCtx);\n            \n            ttscommit;\n            \n            info(strFmt(\"Sales order %1 processed successfully with %2 lines and %3 charges\",\n                       this.SalesId,\n                       this.SalesLines ? this.SalesLines.elements() : 0,\n                       this.SalesCharges ? this.SalesCharges.elements() : 0));\n        }\n        catch (Exception::Error)\n        {\n            error(\"Failed to process sales order composite entity\");\n            throw;\n        }\n    }\n    \n    /// <summary>\n    /// Process sales lines with proper line number sequencing\n    /// </summary>\n    private void processSalesLines(SalesTable _salesTable, DataEntityRuntimeContext _entityCtx)\n    {\n        DEV_SalesLineEntity         lineEntity;\n        SalesLine                   salesLine;\n        ListEnumerator              lineEnum;\n        LineNum                     currentLineNum = 0;\n        \n        if (!this.SalesLines || this.SalesLines.empty())\n            return;\n        \n        // Delete existing lines for updates\n        delete_from salesLine\n            where salesLine.SalesId == _salesTable.SalesId;\n        \n        lineEnum = this.SalesLines.getEnumerator();\n        \n        while (lineEnum.moveNext())\n        {\n            lineEntity = lineEnum.current();\n            currentLineNum += 1;\n            \n            salesLine.clear();\n            salesLine.initValue();\n            salesLine.initFromSalesTable(_salesTable);\n            \n            // Map line fields\n            salesLine.LineNum = currentLineNum * 1.0;  // LineNum is Real type\n            salesLine.ItemId = lineEntity.getItemId();\n            salesLine.SalesQty = lineEntity.getQuantity();\n            salesLine.SalesPrice = lineEntity.getUnitPrice();\n            \n            // Validate inventory dimensions and availability\n            if (!salesLine.validateWrite())\n            {\n                throw error(strFmt(\"Sales line %1 validation failed for item %2\", \n                                  currentLineNum, salesLine.ItemId));\n            }\n            \n            salesLine.insert();\n        }\n    }\n    \n    /// <summary>\n    /// Process miscellaneous charges linked to order\n    /// </summary>\n    private void processSalesCharges(SalesTable _salesTable, DataEntityRuntimeContext _entityCtx)\n    {\n        DEV_SalesChargeEntity       chargeEntity;\n        MarkupTrans                 markupTrans;\n        ListEnumerator              chargeEnum;\n        \n        if (!this.SalesCharges || this.SalesCharges.empty())\n            return;\n        \n        // Delete existing charges\n        delete_from markupTrans\n            where markupTrans.TransTableId == _salesTable.TableId\n               && markupTrans.TransRecId == _salesTable.RecId;\n        \n        chargeEnum = this.SalesCharges.getEnumerator();\n        \n        while (chargeEnum.moveNext())\n        {\n            chargeEntity = chargeEnum.current();\n            \n            markupTrans.clear();\n            markupTrans.initValue();\n            markupTrans.TransTableId = _salesTable.TableId;\n            markupTrans.TransRecId = _salesTable.RecId;\n            markupTrans.MarkupCode = chargeEntity.getChargeCode();\n            markupTrans.Value = chargeEntity.getChargeAmount();\n            markupTrans.CurrencyCode = _salesTable.CurrencyCode;\n            \n            if (markupTrans.validateWrite())\n            {\n                markupTrans.insert();\n            }\n            else\n            {\n                warning(strFmt(\"Charge %1 could not be applied to order %2\", \n                              markupTrans.MarkupCode, _salesTable.SalesId));\n            }\n        }\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "CompositeDataEntityNode attribute must reference the primary table that drives the composite relationship hierarchy",
+        "EntityCollectionProperty attributes define typed collections using Types::Class with specific child entity class references",
+        "Staging table relationships require proper DataAreaId and DefinitionGroup linking to maintain transactional boundaries during DMF operations",
+        "Custom serialize() methods must handle nested collection serialization for proper OData JSON output structure",
+        "mapEntityToDataSource() orchestrates child collection loading from staging tables during import processing",
+        "Transaction scopes (ttsbegin/ttscommit) must encompass entire composite entity persistence to ensure data consistency across related tables"
+      ],
+      "gotchas": [
+        "Child entity staging tables must include parent key fields (like ParentAccountNum) to establish proper relationships — missing these fields causes staging record orphaning and import failures",
+        "EntityCollectionProperty List objects must be initialized in new() method — uninitialized lists cause null reference exceptions during serialization",
+        "Staging table record counts multiply exponentially with nested collections — a 1000-record parent with 10 children each creates 11,000 staging records, potentially causing memory pressure and performance degradation",
+        "Custom staging table queries must include DefinitionGroup filters — omitting this causes cross-execution data bleeding in multi-user DMF scenarios"
+      ],
+      "performance_tips": [
+        "Implement staging table cleanup in persistEntity() after successful processing to prevent staging table bloat during high-volume operations",
+        "Use set-based operations (insert_recordset, update_recordset) for child collection processing instead of row-by-row loops when handling large nested datasets",
+        "Consider pagination strategies for composite entities with large child collections by implementing custom export segmentation based on parent record batches"
+      ],
+      "related_topics": [
+        "xpp_select",
+        "xpp_tables",
+        "data_entities",
+        "data_management_framework"
+      ],
+      "quiz": [
+        {
+          "q": "What attribute is required on the main composite entity class to establish the primary table relationship?",
+          "options": [
+            "DataEntityView",
+            "CompositeDataEntityNode",
+            "EntityCollectionProperty",
+            "DataContractAttribute"
+          ],
+          "answer": 1,
+          "explanation": "CompositeDataEntityNode attribute must be specified with the primary table reference (like tableStr(CustTable)) to establish the root of the composite hierarchy and enable proper staging table relationships."
+        },
+        {
+          "q": "How should child collection properties be declared in composite entities to ensure proper OData serialization?",
+          "options": [
+            "As simple List variables without attributes",
+            "With EntityCollectionProperty attribute specifying Types::Class and child entity classStr",
+            "As arrays of the child entity type",
+            "Using container variables with pack/unpack methods"
+          ],
+          "answer": 1,
+          "explanation": "EntityCollectionProperty attribute with Types::Class and the specific child entity class reference (like classStr(DEV_CustomerAddressEntity)) enables proper type binding and OData JSON serialization for nested collections."
+        },
+        {
+          "q": "What is the primary performance concern when designing composite entities with multiple nested collections?",
+          "options": [
+            "Memory usage during entity instantiation",
+            "OData endpoint response time",
+            "Exponential staging table record growth",
+            "Transaction log size during persistence"
+          ],
+          "answer": 2,
+          "explanation": "Staging table records multiply exponentially with nested collections — each parent record creates staging records for itself plus all child collections, potentially causing massive staging table bloat and performance degradation during large data operations."
+        }
+      ]
+    },
+    "generated_date": "2026-04-03",
+    "auto_generated": true
   }
 ]

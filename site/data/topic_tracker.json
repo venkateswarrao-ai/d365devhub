@@ -1,5 +1,5 @@
 {
-  "last_index": 25,
+  "last_index": 26,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -38,9 +38,10 @@
     "ext_lookup_override",
     "ext_business_event",
     "data_dixf_entities",
-    "data_composite_entity"
+    "data_composite_entity",
+    "data_odata_filter"
   ],
-  "last_run": "2026-04-03",
-  "last_title": "Composite Data Entities",
+  "last_run": "2026-04-04",
+  "last_title": "OData Filtering, Expand & Metadata",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

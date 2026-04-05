@@ -2762,5 +2762,96 @@
     },
     "generated_date": "2026-04-04",
     "auto_generated": true
+  },
+  {
+    "id": "data_recurring_batch",
+    "title": "Recurring Integrations via DIXF API",
+    "section": "Data Model",
+    "level": "Expert",
+    "duration": "25 min read",
+    "tags": [
+      "dixf",
+      "data-integration",
+      "recurring-batch",
+      "api",
+      "automation"
+    ],
+    "summary": "Master the DIXF (Data Import/Export Framework) API for building automated recurring data integrations with proper error handling and monitoring in D365 F&O.",
+    "content": {
+      "overview": "The DIXF API enables sophisticated recurring data integration scenarios beyond the standard import/export UI. This lesson covers building production-grade automated integrations that can handle complex business logic, error recovery, and monitoring requirements. You'll learn to leverage DMFDefinitionGroupExecution, DMFEntity, and related framework classes to create robust recurring batch jobs that integrate external systems with D365 F&O data entities. Understanding these patterns is crucial for enterprise-scale implementations where manual data imports are not feasible and real-time integrations via OData may be overkill or inappropriate due to volume or timing constraints.",
+      "theory": "The DIXF framework centers around DMFDefinitionGroupExecution for orchestrating data operations, with DMFEntity representing individual entity configurations and DMFExecutionId tracking processing instances. The framework uses a staging-to-target pattern where data flows through DMFStagingValidationLog for validation before reaching final tables. Key classes include DMFDefinitionGroupEntity for entity relationships, DMFDataProject for project management, and DMFExecutionSummary for monitoring. The recurring aspect leverages the standard Batch framework (BatchJob, BatchTask) combined with DIXF's execution model. Critical to understand: DIXF maintains its own transaction boundaries separate from your calling code, using DMFExecutionId as the correlation key across all operations. The framework handles parallel processing through batch tasks and provides extensive logging via DMFStagingLog and DMFExecutionLog tables.",
+      "code_examples": [
+        {
+          "title": "Recurring DIXF Import Job Class",
+          "description": "Complete runnable batch job class that processes recurring imports with error handling and monitoring",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Recurring batch job for automated DIXF imports\n/// </summary>\nclass RecurringDIXFImportJob extends RunBaseBatch\n{\n    DMFDefinitionGroupName  definitionGroupName;\n    FilePath                sourceFilePath;\n    boolean                 deleteSourceFile;\n    \n    public static void main(Args _args)\n    {\n        RecurringDIXFImportJob job = new RecurringDIXFImportJob();\n        if (job.prompt())\n        {\n            job.run();\n        }\n    }\n    \n    public void run()\n    {\n        DMFDefinitionGroupExecution     execution;\n        DMFExecutionId                  executionId;\n        DMFDataProject                  dataProject;\n        DMFDefinitionGroup              definitionGroup;\n        System.Exception                ex;\n        \n        try\n        {\n            ttsbegin;\n            \n            // Validate definition group exists\n            definitionGroup = DMFDefinitionGroup::find(definitionGroupName);\n            if (!definitionGroup)\n            {\n                throw error(strFmt(\"Definition group %1 not found\", definitionGroupName));\n            }\n            \n            // Create execution context\n            execution = new DMFDefinitionGroupExecution();\n            execution.parmDefinitionGroupName(definitionGroupName);\n            execution.parmExecutionId(DMFUtil::generateExecutionId());\n            execution.parmIsImport(true);\n            execution.parmReuseStagingTable(false);\n            \n            // Configure source settings\n            execution.parmSourceDataFormatName('Excel');\n            execution.parmPackageUrl(sourceFilePath);\n            \n            executionId = execution.parmExecutionId();\n            \n            // Initialize the import\n            execution.initialize();\n            \n            ttscommit;\n            \n            info(strFmt(\"Started DIXF import with execution ID: %1\", executionId));\n            \n            // Execute the import\n            execution.run();\n            \n            // Monitor completion and validate results\n            this.validateExecution(executionId);\n            \n            // Cleanup source file if requested\n            if (deleteSourceFile && System.IO.File::Exists(sourceFilePath))\n            {\n                System.IO.File::Delete(sourceFilePath);\n                info(strFmt(\"Deleted source file: %1\", sourceFilePath));\n            }\n        }\n        catch (Exception::Error)\n        {\n            error(strFmt(\"DIXF import failed: %1\", infologTxt()));\n            ttsabort;\n        }\n        catch (Exception::CLRError)\n        {\n            ex = CLRInterop::getLastException();\n            error(strFmt(\"CLR error during DIXF import: %1\", ex.get_Message()));\n            ttsabort;\n        }\n    }\n    \n    private void validateExecution(DMFExecutionId _executionId)\n    {\n        DMFExecutionSummary         summary;\n        DMFStagingValidationLog     validationLog;\n        int                         errorCount;\n        \n        // Wait for completion (in production, use proper async patterns)\n        sleep(5000);\n        \n        summary = DMFExecutionSummary::find(_executionId);\n        if (summary.ExecutionStatus != DMFExecutionStatus::Completed)\n        {\n            error(strFmt(\"Import execution %1 failed with status: %2\", \n                        _executionId, \n                        enum2Str(summary.ExecutionStatus)));\n            return;\n        }\n        \n        // Check for validation errors\n        select count(RecId) from validationLog\n            where validationLog.ExecutionId == _executionId\n               && validationLog.LogLevel == DMFLogLevel::Error;\n               \n        errorCount = validationLog.RecId;\n        \n        if (errorCount > 0)\n        {\n            warning(strFmt(\"Import completed but %1 validation errors found. Check DMFStagingValidationLog.\", errorCount));\n        }\n        else\n        {\n            info(strFmt(\"Import execution %1 completed successfully with %2 records processed.\", \n                       _executionId, summary.TotalSourceRows));\n        }\n    }\n    \n    public boolean prompt()\n    {\n        DialogRunbase   dialog;\n        DialogField     fieldDefGroup, fieldFilePath, fieldDeleteFile;\n        boolean         ret;\n        \n        dialog = new DialogRunbase(\"Recurring DIXF Import\", this);\n        \n        fieldDefGroup = dialog.addFieldValue(extendedTypeStr(DMFDefinitionGroupName), definitionGroupName);\n        fieldFilePath = dialog.addFieldValue(extendedTypeStr(FilePath), sourceFilePath);\n        fieldDeleteFile = dialog.addFieldValue(extendedTypeStr(NoYesId), deleteSourceFile);\n        \n        ret = dialog.run();\n        \n        if (ret)\n        {\n            definitionGroupName = fieldDefGroup.value();\n            sourceFilePath = fieldFilePath.value();\n            deleteSourceFile = fieldDeleteFile.value();\n        }\n        \n        return ret;\n    }\n    \n    public container pack()\n    {\n        return [#CurrentVersion, #CurrentList] + \n               [definitionGroupName, sourceFilePath, deleteSourceFile];\n    }\n    \n    public boolean unpack(container _packedClass)\n    {\n        Version version = RunBase::getVersion(_packedClass);\n        \n        switch (version)\n        {\n            case #CurrentVersion:\n                [version, #CurrentList, definitionGroupName, sourceFilePath, deleteSourceFile] = _packedClass;\n                break;\n            default:\n                return false;\n        }\n        \n        return true;\n    }\n    \n    #define.CurrentVersion(1)\n    #define.CurrentList(definitionGroupName, sourceFilePath, deleteSourceFile)\n}"
+        },
+        {
+          "title": "DIXF Entity Configuration and Validation",
+          "description": "Advanced entity setup with custom field mapping and validation rules for recurring imports",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Utility class for configuring DIXF entities with custom validation\n/// </summary>\nclass DIXFEntityConfigurationUtil\n{\n    public static void configureCustomerImportEntity(DMFDefinitionGroupName _defGroupName)\n    {\n        DMFDefinitionGroup          defGroup;\n        DMFDefinitionGroupEntity    defGroupEntity;\n        DMFEntity                   entity;\n        DMFEntityFieldMapping       fieldMapping;\n        \n        ttsbegin;\n        \n        // Get or create definition group\n        defGroup = DMFDefinitionGroup::find(_defGroupName);\n        if (!defGroup)\n        {\n            defGroup.clear();\n            defGroup.DefinitionGroupName = _defGroupName;\n            defGroup.DefinitionGroupDescription = \"Automated Customer Import\";\n            defGroup.insert();\n        }\n        \n        // Configure Customer entity\n        entity = DMFEntity::find('Customer');\n        if (!entity)\n        {\n            throw error(\"Customer entity not found in DIXF configuration\");\n        }\n        \n        // Add entity to definition group\n        select firstonly defGroupEntity\n            where defGroupEntity.DefinitionGroup == _defGroupName\n               && defGroupEntity.Entity == 'Customer';\n               \n        if (!defGroupEntity)\n        {\n            defGroupEntity.clear();\n            defGroupEntity.DefinitionGroup = _defGroupName;\n            defGroupEntity.Entity = 'Customer';\n            defGroupEntity.SequenceNumber = 1;\n            defGroupEntity.SampleFileName = 'Customer_Import_Template.xlsx';\n            defGroupEntity.insert();\n        }\n        \n        // Configure custom field mappings\n        DIXFEntityConfigurationUtil::addCustomFieldMapping(\n            _defGroupName, \n            'Customer',\n            'CustomerAccount',\n            'Account_Number',\n            true,  // Required\n            DMFDataType::String\n        );\n        \n        DIXFEntityConfigurationUtil::addCustomFieldMapping(\n            _defGroupName,\n            'Customer', \n            'InvoiceAccount',\n            'Invoice_Account',\n            false, // Not required - will default to CustomerAccount\n            DMFDataType::String\n        );\n        \n        DIXFEntityConfigurationUtil::addCustomFieldMapping(\n            _defGroupName,\n            'Customer',\n            'CustGroupId', \n            'Customer_Group',\n            true,\n            DMFDataType::String\n        );\n        \n        ttscommit;\n        \n        info(strFmt(\"DIXF entity configuration completed for %1\", _defGroupName));\n    }\n    \n    private static void addCustomFieldMapping(\n        DMFDefinitionGroupName  _defGroupName,\n        DMFEntityName          _entityName,\n        FieldName              _targetField,\n        str                    _sourceField,\n        boolean                _isRequired,\n        DMFDataType           _dataType)\n    {\n        DMFEntityFieldMapping   fieldMapping;\n        \n        // Check if mapping already exists\n        select firstonly fieldMapping\n            where fieldMapping.DefinitionGroup == _defGroupName\n               && fieldMapping.Entity == _entityName\n               && fieldMapping.TargetFieldName == _targetField;\n               \n        if (!fieldMapping)\n        {\n            fieldMapping.clear();\n            fieldMapping.DefinitionGroup = _defGroupName;\n            fieldMapping.Entity = _entityName;\n            fieldMapping.TargetFieldName = _targetField;\n            fieldMapping.SourceFieldName = _sourceField;\n            fieldMapping.IsRequired = _isRequired;\n            fieldMapping.DataType = _dataType;\n            fieldMapping.MappingDirection = DMFMappingDirection::SourceToTarget;\n            fieldMapping.insert();\n        }\n        else\n        {\n            // Update existing mapping\n            ttsbegin;\n            fieldMapping.selectForUpdate(true);\n            fieldMapping.SourceFieldName = _sourceField;\n            fieldMapping.IsRequired = _isRequired;\n            fieldMapping.DataType = _dataType;\n            fieldMapping.update();\n            ttscommit;\n        }\n    }\n    \n    public static void validateEntityConfiguration(DMFDefinitionGroupName _defGroupName)\n    {\n        DMFDefinitionGroupEntity    defGroupEntity;\n        DMFEntityFieldMapping      fieldMapping;\n        DMFEntity                  entity;\n        int                        entityCount, mappingCount;\n        \n        // Count entities in definition group\n        select count(RecId) from defGroupEntity\n            where defGroupEntity.DefinitionGroup == _defGroupName;\n            \n        entityCount = defGroupEntity.RecId;\n        \n        if (entityCount == 0)\n        {\n            throw error(strFmt(\"No entities configured for definition group %1\", _defGroupName));\n        }\n        \n        // Validate each entity has proper field mappings\n        while select defGroupEntity\n            where defGroupEntity.DefinitionGroup == _defGroupName\n        {\n            select count(RecId) from fieldMapping\n                where fieldMapping.DefinitionGroup == _defGroupName\n                   && fieldMapping.Entity == defGroupEntity.Entity\n                   && fieldMapping.IsRequired;\n                   \n            mappingCount = fieldMapping.RecId;\n            \n            if (mappingCount == 0)\n            {\n                warning(strFmt(\"Entity %1 has no required field mappings configured\", \n                              defGroupEntity.Entity));\n            }\n            \n            // Validate entity exists and is active\n            entity = DMFEntity::find(defGroupEntity.Entity);\n            if (!entity || !entity.IsEnabled)\n            {\n                throw error(strFmt(\"Entity %1 is not found or not enabled\", \n                                  defGroupEntity.Entity));\n            }\n        }\n        \n        info(strFmt(\"Entity configuration validation completed for %1. %2 entities configured.\", \n                   _defGroupName, entityCount));\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "DMFDefinitionGroupExecution orchestrates the entire import process — always use execution.initialize() before execution.run() to properly set up staging tables and validation rules",
+        "DMFExecutionId serves as the correlation key across all DIXF operations — store this value for monitoring, error recovery, and audit trails in production systems",
+        "DIXF maintains separate transaction boundaries from your calling code — use ttsbegin/ttscommit around setup operations but let DIXF handle data import transactions internally",
+        "DMFStagingValidationLog captures field-level validation errors — implement proper error handling by querying this table post-execution for detailed failure analysis",
+        "Recurring integrations require proper cleanup strategies — consider archiving successful execution logs and implementing retention policies for DMFStagingLog entries to prevent database bloat"
+      ],
+      "gotchas": [
+        "Never call ttsbegin/ttscommit around DMFDefinitionGroupExecution.run() — DIXF manages its own transactions and external transaction boundaries will cause deadlocks and data corruption",
+        "DMFExecutionSummary.ExecutionStatus may show 'Completed' even with validation errors — always check DMFStagingValidationLog for error-level entries to determine true import success",
+        "File path references in execution.parmPackageUrl() must be accessible by the AOS service account — UNC paths and local drive references often fail in multi-AOS environments without proper security configuration"
+      ],
+      "performance_tips": [
+        "Use execution.parmReuseStagingTable(true) for recurring imports with consistent schemas to avoid expensive staging table recreation on each run",
+        "Implement DMFDefinitionGroupEntity.SequenceNumber properly when importing related entities to ensure parent records are processed before child dependencies"
+      ],
+      "related_topics": [
+        "xpp_batch",
+        "xpp_sysoperation",
+        "data_entities"
+      ],
+      "quiz": [
+        {
+          "q": "What is the correct sequence for executing a DIXF import via API?",
+          "options": [
+            "execution.run() then execution.initialize()",
+            "execution.initialize() then execution.run()",
+            "execution.run() only",
+            "ttsbegin, execution.run(), ttscommit"
+          ],
+          "answer": 1,
+          "explanation": "You must call execution.initialize() before execution.run(). The initialize() method sets up staging tables, validates entity configurations, and prepares the execution context. Calling run() first will result in missing staging table errors."
+        },
+        {
+          "q": "How should you handle transactions when using DMFDefinitionGroupExecution?",
+          "options": [
+            "Wrap the entire execution in ttsbegin/ttscommit",
+            "Use ttsbegin/ttscommit only around setup operations, let DIXF handle import transactions",
+            "Never use transactions with DIXF",
+            "Use implicit transactions only"
+          ],
+          "answer": 1,
+          "explanation": "DIXF manages its own internal transactions during the import process. You should use ttsbegin/ttscommit around setup operations like creating execution contexts, but never around execution.run() as this interferes with DIXF's transaction management."
+        },
+        {
+          "q": "What's the most reliable way to determine if a DIXF import truly succeeded?",
+          "options": [
+            "Check if execution.run() returns without exceptions",
+            "Verify DMFExecutionSummary.ExecutionStatus == Completed",
+            "Query DMFStagingValidationLog for error-level entries AND check ExecutionStatus",
+            "Count records in target tables"
+          ],
+          "answer": 2,
+          "explanation": "DMFExecutionSummary.ExecutionStatus can show 'Completed' even when validation errors prevented data from reaching target tables. You must check both the execution status AND query DMFStagingValidationLog for error-level entries to determine true success."
+        }
+      ]
+    },
+    "generated_date": "2026-04-05",
+    "auto_generated": true
   }
 ]

@@ -1,1 +1,1 @@
-OData Filtering, Expand & Metadata
+Recurring Integrations via DIXF API

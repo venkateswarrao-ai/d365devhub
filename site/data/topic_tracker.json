@@ -1,5 +1,5 @@
 {
-  "last_index": 26,
+  "last_index": 27,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -39,9 +39,10 @@
     "ext_business_event",
     "data_dixf_entities",
     "data_composite_entity",
-    "data_odata_filter"
+    "data_odata_filter",
+    "data_recurring_batch"
   ],
-  "last_run": "2026-04-04",
-  "last_title": "OData Filtering, Expand & Metadata",
+  "last_run": "2026-04-05",
+  "last_title": "Recurring Integrations via DIXF API",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

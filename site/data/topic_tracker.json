@@ -1,5 +1,5 @@
 {
-  "last_index": 29,
+  "last_index": 30,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -42,9 +42,10 @@
     "data_odata_filter",
     "data_recurring_batch",
     "data_entity_events",
-    "fin_voucher_framework"
+    "fin_voucher_framework",
+    "fin_subledger"
   ],
-  "last_run": "2026-04-07",
-  "last_title": "Voucher Framework & Ledger Posting",
+  "last_run": "2026-04-08",
+  "last_title": "Subledger Journal & AccountingEngine",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

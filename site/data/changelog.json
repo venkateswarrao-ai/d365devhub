@@ -1,5 +1,13 @@
 [
   {
+    "date": "Apr 08",
+    "tag": "LESSON",
+    "title": "Subledger Journal & AccountingEngine",
+    "section": "Finance",
+    "level": "Expert",
+    "id": "fin_subledger"
+  },
+  {
     "date": "Apr 07",
     "tag": "LESSON",
     "title": "Voucher Framework & Ledger Posting",
@@ -230,13 +238,5 @@
     "section": "X++ Language",
     "level": "Intermediate",
     "id": "xpp_delegates"
-  },
-  {
-    "date": "Mar 10",
-    "tag": "LESSON",
-    "title": "Display & Edit Methods in X++",
-    "section": "X++ Language",
-    "level": "Intermediate",
-    "id": "xpp_display_methods"
   }
 ]

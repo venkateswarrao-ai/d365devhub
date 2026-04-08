@@ -3040,5 +3040,102 @@
     },
     "generated_date": "2026-04-07",
     "auto_generated": true
+  },
+  {
+    "id": "fin_subledger",
+    "title": "Subledger Journal & AccountingEngine",
+    "section": "Finance",
+    "level": "Expert",
+    "duration": "25 min read",
+    "tags": [
+      "subledger",
+      "accounting-engine",
+      "financials",
+      "journaling",
+      "accounting-distribution"
+    ],
+    "summary": "Master the D365 F&O subledger framework for creating custom journal entries with proper accounting distributions, source document integration, and voucher generation.",
+    "content": {
+      "overview": "The Subledger Journal framework in D365 F&O provides a sophisticated mechanism for creating accounting entries that originate from source documents outside the General Ledger module. Unlike direct GL journal creation, subledger journaling maintains full audit trails, supports complex accounting distributions, and integrates seamlessly with the source document workflow. This framework is essential for modules like Accounts Payable, Accounts Receivable, Fixed Assets, and custom business modules that need to generate accounting entries.\n\nThe AccountingEngine serves as the orchestrator for subledger processing, managing the flow from source document events to final voucher posting. It handles accounting distribution creation, currency translations, tax calculations, and ensures proper sequencing of accounting events. Understanding this architecture is crucial when extending financial functionality or integrating custom modules with D365's accounting subsystem.",
+      "theory": "The subledger architecture centers around several key classes and frameworks: SubledgerJournalizer, AccountingDistribution, SourceDocumentLine, and the AccountingEngine itself. The process begins when a source document (like a purchase order or sales invoice) triggers an accounting event through the SourceDocumentAccountingFramework. The SubledgerJournalAccountEntry table stores intermediate accounting entries before final posting to LedgerTrans via GeneralJournalAccountEntry.\n\nKey AOT objects include: SubledgerJournalAccountEntry, SourceDocumentAccountingFramework, AccountingDistribution, LedgerEntryJournal, and GeneralJournalEngine. The framework uses the Strategy pattern extensively - AccountingEvent classes define business logic, while AccountingDistribution templates handle different distribution scenarios. Currency handling occurs through LedgerExchAdj, and tax integration flows through TaxAccountingProvider classes.\n\nThe AccountingEngine operates in phases: Event Recognition → Distribution Creation → Journal Entry Generation → Posting to GL. Each phase has extension points through delegates and can be customized via class inheritance or Chain of Command.",
+      "code_examples": [
+        {
+          "title": "Creating Custom Subledger Journal Entry",
+          "description": "Demonstrates how to create a subledger journal entry for a custom business event with proper accounting distributions",
+          "language": "xpp",
+          "code": "// Custom subledger journal creation example\npublic class CustomSubledgerJournalizer\n{\n    public static void createCustomJournalEntry(\n        RefRecId _sourceDocumentRecId,\n        AmountCur _amount,\n        DimensionDefault _dimension)\n    {\n        SubledgerJournalAccountEntry subledgerEntry;\n        GeneralJournalAccountEntry generalJournalEntry;\n        LedgerJournalTrans ledgerJournalTrans;\n        \n        ttsbegin;\n        try\n        {\n            // Create subledger journal account entry\n            subledgerEntry.clear();\n            subledgerEntry.initValue();\n            subledgerEntry.TransDate = DateTimeUtil::date(DateTimeUtil::utcNow());\n            subledgerEntry.AccountingCurrencyAmount = _amount;\n            subledgerEntry.CurrencyCode = CompanyInfo::standardCurrency();\n            subledgerEntry.LedgerDimension = _dimension;\n            subledgerEntry.TransactionCurrencyAmount = _amount;\n            subledgerEntry.Text = \"Custom business event accounting entry\";\n            subledgerEntry.JournalCategory = LedgerJournalType::Daily;\n            subledgerEntry.SourceDocumentHeader = _sourceDocumentRecId;\n            \n            if (!subledgerEntry.validateWrite())\n            {\n                throw Exception::Error;\n            }\n            subledgerEntry.insert();\n            \n            // Create corresponding general journal entry\n            generalJournalEntry.clear();\n            generalJournalEntry.initFromSubledgerJournalAccountEntry(subledgerEntry);\n            generalJournalEntry.insert();\n            \n            // Link to source document for audit trail\n            SourceDocumentAccountingFramework::createAccountingDistribution(\n                _sourceDocumentRecId,\n                subledgerEntry.RecId,\n                _dimension,\n                _amount);\n                \n            ttscommit;\n            info(strFmt(\"Subledger journal entry created: %1\", subledgerEntry.RecId));\n        }\n        catch (Exception::Error)\n        {\n            error(\"Failed to create subledger journal entry\");\n            throw;\n        }\n    }\n}"
+        },
+        {
+          "title": "Custom Accounting Distribution Provider",
+          "description": "Advanced example showing how to implement a custom accounting distribution provider for complex business scenarios",
+          "language": "xpp",
+          "code": "// Custom accounting distribution provider\nclass CustomAccountingDistributionProvider extends AccountingDistributionProvider\n{\n    protected void createAccountingDistributions()\n    {\n        AccountingDistribution accountingDistribution;\n        SourceDocumentLine sourceDocumentLine;\n        LedgerDimension ledgerDimension;\n        DimensionAttributeValueSet dimAttributeValueSet;\n        \n        // Get source document context\n        sourceDocumentLine = this.getSourceDocumentLine();\n        \n        if (!sourceDocumentLine)\n        {\n            throw error(\"@SYS26332\"); // Invalid source document\n        }\n        \n        try\n        {\n            // Create debit distribution\n            accountingDistribution = this.createAccountingDistribution();\n            accountingDistribution.LedgerDimension = this.getDebitLedgerDimension();\n            accountingDistribution.DistributionPercent = 100.0;\n            accountingDistribution.PostingType = LedgerPostingType::CustPaym;\n            \n            // Apply custom dimension logic\n            ledgerDimension = this.buildCustomDimensions(sourceDocumentLine);\n            accountingDistribution.LedgerDimension = ledgerDimension;\n            \n            // Set accounting currency amounts\n            this.setAccountingCurrencyAmounts(\n                accountingDistribution,\n                sourceDocumentLine.getTransactionCurrencyAmount(),\n                sourceDocumentLine.getCurrencyCode());\n                \n            accountingDistribution.insert();\n            \n            // Create corresponding credit distribution\n            this.createCreditDistribution(sourceDocumentLine, ledgerDimension);\n        }\n        catch (Exception::Error)\n        {\n            error(\"Failed to create custom accounting distributions\");\n            throw;\n        }\n    }\n    \n    private LedgerDimension buildCustomDimensions(SourceDocumentLine _sourceDocLine)\n    {\n        DimensionDefault dimensionDefault;\n        DimensionAttributeValueSet dimAttributeValueSet;\n        \n        // Custom dimension building logic\n        dimensionDefault = DimensionDefaultingService::serviceCreateLedgerDimension(\n            this.getMainAccountRecId(),\n            this.buildDimensionAttributeValueSet(_sourceDocLine));\n            \n        return dimensionDefault;\n    }\n    \n    private void createCreditDistribution(\n        SourceDocumentLine _sourceDocLine,\n        LedgerDimension _offsetDimension)\n    {\n        AccountingDistribution creditDistribution;\n        \n        creditDistribution = this.createAccountingDistribution();\n        creditDistribution.LedgerDimension = _offsetDimension;\n        creditDistribution.DistributionPercent = -100.0; // Credit side\n        creditDistribution.PostingType = LedgerPostingType::CustBalance;\n        \n        this.setAccountingCurrencyAmounts(\n            creditDistribution,\n            -_sourceDocLine.getTransactionCurrencyAmount(),\n            _sourceDocLine.getCurrencyCode());\n            \n        creditDistribution.insert();\n    }\n}"
+        },
+        {
+          "title": "AccountingEngine Integration with Source Documents",
+          "description": "Shows how to properly integrate with the AccountingEngine for posting subledger entries to the general ledger",
+          "language": "xpp",
+          "code": "// AccountingEngine integration pattern\nclass CustomAccountingEngineProcessor\n{\n    public static void processSubledgerToGL(\n        RefRecId _subledgerJournalRecId,\n        LedgerJournalId _targetJournalId = '')\n    {\n        SubledgerJournalAccountEntry subledgerEntry;\n        LedgerJournalTrans ledgerJournalTrans;\n        LedgerJournalTable ledgerJournalTable;\n        GeneralJournalEngine generalJournalEngine;\n        AccountingEvent accountingEvent;\n        \n        ttsbegin;\n        try\n        {\n            subledgerEntry = SubledgerJournalAccountEntry::find(_subledgerJournalRecId);\n            \n            if (!subledgerEntry)\n            {\n                throw error(\"Subledger journal entry not found\");\n            }\n            \n            // Create or find target journal\n            if (!_targetJournalId)\n            {\n                ledgerJournalTable = this.createTargetJournal();\n                _targetJournalId = ledgerJournalTable.JournalNum;\n            }\n            else\n            {\n                ledgerJournalTable = LedgerJournalTable::find(_targetJournalId);\n            }\n            \n            // Initialize accounting event context\n            accountingEvent = AccountingEvent::newFromSubledgerEntry(subledgerEntry);\n            \n            // Create GL journal transaction\n            ledgerJournalTrans.clear();\n            ledgerJournalTrans.JournalNum = _targetJournalId;\n            ledgerJournalTrans.TransDate = subledgerEntry.TransDate;\n            ledgerJournalTrans.AccountType = LedgerJournalACType::Ledger;\n            ledgerJournalTrans.LedgerDimension = subledgerEntry.LedgerDimension;\n            ledgerJournalTrans.AmountCurDebit = (subledgerEntry.AccountingCurrencyAmount > 0) ? \n                subledgerEntry.AccountingCurrencyAmount : 0;\n            ledgerJournalTrans.AmountCurCredit = (subledgerEntry.AccountingCurrencyAmount < 0) ? \n                -subledgerEntry.AccountingCurrencyAmount : 0;\n            ledgerJournalTrans.CurrencyCode = subledgerEntry.CurrencyCode;\n            ledgerJournalTrans.Txt = subledgerEntry.Text;\n            ledgerJournalTrans.SourceDocumentHeader = subledgerEntry.SourceDocumentHeader;\n            \n            // Set voucher and line numbers\n            NumberSeq::newGetVoucherFromCode(\n                ledgerJournalTable.NumberSequenceTable).parmManual(false);\n            ledgerJournalTrans.Voucher = NumberSeq::newGetVoucherFromCode(\n                ledgerJournalTable.NumberSequenceTable).voucher();\n                \n            if (!ledgerJournalTrans.validateWrite())\n            {\n                throw Exception::Error;\n            }\n            \n            ledgerJournalTrans.insert();\n            \n            // Update subledger entry status\n            subledgerEntry.selectForUpdate(true);\n            subledger.PostingStatus = SubledgerPostingStatus::Posted;\n            subledgerEntry.GeneralJournalEntry = ledgerJournalTrans.RecId;\n            subledgerEntry.update();\n            \n            // Initialize general journal engine for posting\n            generalJournalEngine = GeneralJournalEngine::construct();\n            generalJournalEngine.run(_targetJournalId);\n            \n            ttscommit;\n            \n            info(strFmt(\"Subledger entry posted to GL journal: %1, Voucher: %2\", \n                _targetJournalId, ledgerJournalTrans.Voucher));\n        }\n        catch (Exception::Error)\n        {\n            error(\"Failed to process subledger entry to General Ledger\");\n            throw;\n        }\n    }\n    \n    private static LedgerJournalTable createTargetJournal()\n    {\n        LedgerJournalTable ledgerJournalTable;\n        LedgerJournalName ledgerJournalName;\n        \n        ledgerJournalName = LedgerJournalName::find('GenJrn', true); // Daily journal\n        \n        ledgerJournalTable.clear();\n        ledgerJournalTable.JournalName = ledgerJournalName.JournalName;\n        ledgerJournalTable.JournalType = ledgerJournalName.JournalType;\n        ledgerJournalTable.Name = \"Subledger Auto-Generated\";\n        ledgerJournalTable.JournalNum = JournalTableData::newTable(ledgerJournalTable).nextJournalId();\n        \n        if (!ledgerJournalTable.validateWrite())\n        {\n            throw error(\"Cannot create target journal\");\n        }\n        \n        ledgerJournalTable.insert();\n        return ledgerJournalTable;\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "SubledgerJournalAccountEntry serves as the staging table before GL posting — always validate entries before GeneralJournalAccountEntry creation",
+        "AccountingDistribution framework requires balanced distributions (debits = credits) — use DistributionPercent field correctly for multi-line distributions",
+        "SourceDocumentAccountingFramework maintains audit trails — always link subledger entries to originating documents via SourceDocumentHeader field",
+        "Currency conversion happens automatically through LedgerExchAdj — set both TransactionCurrencyAmount and AccountingCurrencyAmount appropriately",
+        "AccountingEngine processes entries in batches — consider performance implications when creating large volumes of subledger entries"
+      ],
+      "gotchas": [
+        "Never bypass SubledgerJournalAccountEntry validation — the validateWrite() method enforces critical business rules including dimension validation and currency checks that prevent posting errors",
+        "Avoid creating GeneralJournalAccountEntry records directly — always use the established pattern of SubledgerJournalAccountEntry first, as the AccountingEngine expects this flow for proper voucher sequencing",
+        "Don't forget ttsbegin/ttscommit boundaries around complete accounting entry creation — partial commits can leave the subledger in an inconsistent state with orphaned distributions"
+      ],
+      "performance_tips": [
+        "Use set-based operations when creating multiple subledger entries — batch SubledgerJournalAccountEntry.insertRecordSet() instead of individual inserts to reduce database round trips",
+        "Cache LedgerDimension lookups in static maps — DimensionDefaultingService calls are expensive and often repeated for similar dimension combinations"
+      ],
+      "related_topics": [
+        "xpp_financial",
+        "xpp_batch",
+        "xpp_workflow"
+      ],
+      "quiz": [
+        {
+          "q": "What is the correct sequence for creating a complete subledger journal entry?",
+          "options": [
+            "GeneralJournalAccountEntry → SubledgerJournalAccountEntry → LedgerJournalTrans",
+            "SubledgerJournalAccountEntry → GeneralJournalAccountEntry → AccountingDistribution",
+            "AccountingDistribution → SubledgerJournalAccountEntry → GeneralJournalAccountEntry",
+            "LedgerJournalTrans → SubledgerJournalAccountEntry → AccountingDistribution"
+          ],
+          "answer": 1,
+          "explanation": "The correct sequence is SubledgerJournalAccountEntry first (staging), then GeneralJournalAccountEntry (for GL integration), followed by AccountingDistribution (for audit trail). This ensures proper validation and maintains the accounting engine's expected data flow."
+        },
+        {
+          "q": "Which field is essential for maintaining audit trails between subledger entries and source documents?",
+          "options": [
+            "GeneralJournalEntry",
+            "SourceDocumentHeader",
+            "LedgerDimension",
+            "PostingStatus"
+          ],
+          "answer": 1,
+          "explanation": "SourceDocumentHeader links the subledger entry back to the originating business document (PO, invoice, etc.), which is crucial for audit trails and regulatory compliance. This field enables tracing from GL back to source transactions."
+        },
+        {
+          "q": "When implementing a custom AccountingDistributionProvider, what must be true about the distribution percentages?",
+          "options": [
+            "All percentages must be positive values",
+            "The sum of all percentages must equal zero (balanced)",
+            "Each distribution must have exactly 100% allocation",
+            "Percentages are optional and default to equal splits"
+          ],
+          "answer": 1,
+          "explanation": "Accounting distributions must be balanced, meaning the sum of all DistributionPercent values must equal zero (debits as positive, credits as negative percentages). This ensures the fundamental accounting equation (Assets = Liabilities + Equity) is maintained."
+        }
+      ]
+    },
+    "generated_date": "2026-04-08",
+    "auto_generated": true
   }
 ]

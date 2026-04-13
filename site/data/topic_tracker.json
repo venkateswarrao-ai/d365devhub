@@ -1,5 +1,5 @@
 {
-  "last_index": 34,
+  "last_index": 35,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -47,9 +47,10 @@
     "fin_tax_engine",
     "fin_bank_reconcile",
     "fin_budget_control",
-    "fin_fixed_assets"
+    "fin_fixed_assets",
+    "fin_currency_reval"
   ],
-  "last_run": "2026-04-12",
-  "last_title": "Fixed Assets Posting & Depreciation",
+  "last_run": "2026-04-13",
+  "last_title": "Currency Revaluation via X++",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

@@ -1,5 +1,13 @@
 [
   {
+    "date": "Apr 13",
+    "tag": "LESSON",
+    "title": "Currency Revaluation via X++",
+    "section": "Finance",
+    "level": "Expert",
+    "id": "fin_currency_reval"
+  },
+  {
     "date": "Apr 12",
     "tag": "LESSON",
     "title": "Fixed Assets Posting & Depreciation",
@@ -230,13 +238,5 @@
     "section": "X++ Language",
     "level": "Expert",
     "id": "xpp_sysoperation"
-  },
-  {
-    "date": "Mar 14",
-    "tag": "LESSON",
-    "title": "RunBase & RunBaseBatch Framework",
-    "section": "X++ Language",
-    "level": "Intermediate",
-    "id": "xpp_runbase"
   }
 ]

@@ -1,1 +1,1 @@
-Currency Revaluation via X++
+Azure Service Bus: Publish & Subscribe

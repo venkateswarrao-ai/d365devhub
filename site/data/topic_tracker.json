@@ -1,5 +1,5 @@
 {
-  "last_index": 35,
+  "last_index": 36,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -48,9 +48,10 @@
     "fin_bank_reconcile",
     "fin_budget_control",
     "fin_fixed_assets",
-    "fin_currency_reval"
+    "fin_currency_reval",
+    "int_service_bus"
   ],
-  "last_run": "2026-04-13",
-  "last_title": "Currency Revaluation via X++",
+  "last_run": "2026-04-14",
+  "last_title": "Azure Service Bus: Publish & Subscribe",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

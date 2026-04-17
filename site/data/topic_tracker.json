@@ -1,5 +1,5 @@
 {
-  "last_index": 38,
+  "last_index": 39,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -51,9 +51,10 @@
     "fin_currency_reval",
     "int_service_bus",
     "int_logic_apps_adv",
-    "int_power_automate"
+    "int_power_automate",
+    "int_dataverse_link"
   ],
-  "last_run": "2026-04-16",
-  "last_title": "Power Automate + D365 F&O Connectors",
+  "last_run": "2026-04-17",
+  "last_title": "Dataverse Link & Virtual Tables",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

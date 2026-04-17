@@ -3879,5 +3879,96 @@
     },
     "generated_date": "2026-04-16",
     "auto_generated": true
+  },
+  {
+    "id": "int_dataverse_link",
+    "title": "Dataverse Link & Virtual Tables",
+    "section": "Integrations",
+    "level": "Expert",
+    "duration": "18 min read",
+    "tags": [
+      "dataverse",
+      "virtual-tables",
+      "dual-write",
+      "odata",
+      "power-platform"
+    ],
+    "summary": "Master Dataverse virtual tables implementation for real-time D365 F&O data access without data duplication, including custom virtual entity providers and advanced synchronization patterns.",
+    "content": {
+      "overview": "Dataverse virtual tables provide real-time access to D365 F&O data from Power Platform apps without data synchronization or duplication. Unlike dual-write which maintains separate copies, virtual tables query F&O directly using OData endpoints, making them ideal for read-heavy scenarios where data freshness is critical.\n\nThis architecture enables Power Apps, Power Automate, and other Dataverse consumers to interact with F&O entities as if they were native Dataverse tables. However, the implementation requires careful consideration of query performance, security boundaries, and the limitations of the OData protocol.\n\nVirtual tables excel in scenarios requiring real-time financial reporting, inventory lookups, or customer data validation where dual-write synchronization delays are unacceptable. They also eliminate the complexity of managing data consistency across two systems, though at the cost of increased query latency and F&O system load.",
+      "theory": "Virtual tables in Dataverse are implemented through the Microsoft.Dynamics.Integrator.VirtualConnectorService, which translates Dataverse FetchXML queries into OData calls against F&O's web API. The connector service maintains metadata mappings between Dataverse virtual table schemas and F&O data entities, handling field type conversions and relationship navigation.\n\nThe underlying architecture leverages the DMFEntity framework in F&O, specifically classes like DMFEntityReader and DMFDefinitionGroupEntity for metadata discovery. Each virtual table corresponds to a published data entity in F&O's Data management workspace. The ODataController classes (extending DataEntityController) handle the actual REST endpoint implementation.\n\nSecurity is enforced at multiple layers: Azure AD authentication, F&O role-based security through SecurityPolicy classes, and field-level security via the AOSAuthorization framework. Query optimization relies on proper indexing of the underlying F&O tables and efficient use of $filter, $select, and $expand OData parameters. The virtual connector implements query plan caching and connection pooling to minimize F&O database impact.",
+      "code_examples": [
+        {
+          "title": "Custom Virtual Entity Provider Implementation",
+          "description": "Creating a custom data entity optimized for virtual table consumption with proper security and performance considerations",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Custom data entity for virtual table consumption\n/// Optimizes query performance and implements field-level security\n/// </summary>\n[DataEntity,\n DataEntityPublic(true),\n DataEntityCategory('Master')]\npublic final class CustomVirtualCustomerEntity extends common\n{\n    // Primary key field - required for virtual tables\n    [DataEntityKey, DataField('AccountNum')]\n    public CustAccount AccountNum;\n    \n    [DataField('Name')]\n    public Name Name;\n    \n    [DataField('CurrencyCode')]\n    public CurrencyCode CurrencyCode;\n    \n    [DataField('CreditLimit')]\n    public AmountMST CreditLimit;\n    \n    // Computed field for virtual table consumers\n    [DataField('IsBlocked')]\n    public NoYes IsBlocked;\n\n    /// <summary>\n    /// Optimized select method for virtual table queries\n    /// Implements explicit joins and field selection\n    /// </summary>\n    public void select()\n    {\n        CustTable custTable;\n        DirPartyTable partyTable;\n        \n        // Use explicit joins for better query plan\n        select AccountNum, CurrencyCode, CreditMax, Blocked from custTable\n            join Name from partyTable\n            where partyTable.RecId == custTable.Party\n                && custTable.DataAreaId == curext()\n                && this.validateAccess(custTable);\n        \n        if (custTable.RecId)\n        {\n            this.AccountNum = custTable.AccountNum;\n            this.Name = partyTable.Name;\n            this.CurrencyCode = custTable.Currency;\n            this.CreditLimit = custTable.CreditMax;\n            this.IsBlocked = custTable.Blocked;\n        }\n    }\n\n    /// <summary>\n    /// Security validation for field-level access\n    /// </summary>\n    private boolean validateAccess(CustTable _custTable)\n    {\n        SecurityRights rights;\n        \n        // Check table-level security\n        rights = SecurityPolicy::checkAccess(\n            tableNum(CustTable),\n            _custTable.RecId,\n            SecurityAction::Read);\n        \n        // Additional business logic security\n        if (rights == SecurityRights::NoAccess)\n        {\n            return false;\n        }\n        \n        // Implement custom security rules\n        return this.validateCustomerAccess(_custTable.AccountNum);\n    }\n\n    /// <summary>\n    /// Custom business security validation\n    /// </summary>\n    private boolean validateCustomerAccess(CustAccount _accountNum)\n    {\n        UserInfo userInfo = UserInfo::find();\n        \n        // Example: Restrict access based on user's sales territory\n        if (userInfo.salesTerritoryId)\n        {\n            CustTable custTable = CustTable::find(_accountNum);\n            return (custTable.salesTerritoryId == userInfo.salesTerritoryId);\n        }\n        \n        return true;\n    }\n\n    /// <summary>\n    /// Override validateWrite to prevent updates via virtual table\n    /// Virtual tables should typically be read-only\n    /// </summary>\n    public boolean validateWrite()\n    {\n        throw error(\"@SYS103832\"); // Updates not allowed through virtual table\n    }\n\n    /// <summary>\n    /// Implement paging support for large datasets\n    /// </summary>\n    public QueryRun buildQuery()\n    {\n        QueryRun queryRun;\n        Query query = new Query();\n        QueryBuildDataSource qbds;\n        \n        qbds = query.dataSourceTable(tableNum(CustTable));\n        qbds.addRange(fieldNum(CustTable, DataAreaId)).value(curext());\n        \n        // Add performance hints\n        qbds.orderBy(fieldNum(CustTable, AccountNum));\n        qbds.indexHint(CustTableIdx);\n        \n        queryRun = new QueryRun(query);\n        return queryRun;\n    }\n}"
+        },
+        {
+          "title": "Virtual Table Performance Monitor",
+          "description": "Monitoring and troubleshooting virtual table performance with custom telemetry and query optimization",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Performance monitoring for virtual table queries\n/// Tracks query patterns and provides optimization recommendations\n/// </summary>\nfinal class VirtualTablePerformanceMonitor\n{\n    private Map queryStatsMap;\n    private int maxQueryTime;\n    private boolean enableDetailedLogging;\n\n    public void new()\n    {\n        queryStatsMap = new Map(Types::String, Types::Container);\n        maxQueryTime = 5000; // 5 seconds threshold\n        enableDetailedLogging = SysGlobalConfiguration::isFeatureEnabled(\n            'VirtualTableDetailedLogging');\n    }\n\n    /// <summary>\n    /// Monitor OData query execution\n    /// Called from DataEntityController.get() method via CoC\n    /// </summary>\n    public void monitorQuery(str _entityName, str _odataQuery)\n    {\n        utcdatetime startTime = DateTimeUtil::utcNow();\n        str queryHash = this.generateQueryHash(_entityName, _odataQuery);\n        \n        try\n        {\n            // Execute the actual query (placeholder for CoC integration)\n            this.executeQuery(_entityName, _odataQuery);\n        }\n        catch (Exception::Error)\n        {\n            // Log query failures\n            this.logQueryFailure(_entityName, _odataQuery, infolog.text());\n            throw;\n        }\n        finally\n        {\n            int executionTime = DateTimeUtil::getDifference(\n                DateTimeUtil::utcNow(), startTime);\n            \n            this.recordQueryStats(queryHash, _entityName, \n                _odataQuery, executionTime);\n            \n            if (executionTime > maxQueryTime)\n            {\n                this.flagSlowQuery(_entityName, _odataQuery, executionTime);\n            }\n        }\n    }\n\n    /// <summary>\n    /// Generate unique hash for query pattern analysis\n    /// </summary>\n    private str generateQueryHash(str _entityName, str _odataQuery)\n    {\n        str normalizedQuery = this.normalizeQuery(_odataQuery);\n        return System.Security.Cryptography.SHA1::computeHash(\n            _entityName + '|' + normalizedQuery);\n    }\n\n    /// <summary>\n    /// Normalize OData query for pattern matching\n    /// </summary>\n    private str normalizeQuery(str _query)\n    {\n        str normalized = _query;\n        \n        // Remove specific values, keep structure\n        normalized = strReplace(normalized, \n            @\"'([^']*)'\" /* regex pattern */, \"'<VALUE>'\");\n        normalized = strReplace(normalized, \n            @\"\\d+\" /* numeric values */, \"<NUM>\");\n        \n        return strLwr(normalized);\n    }\n\n    /// <summary>\n    /// Record query execution statistics\n    /// </summary>\n    private void recordQueryStats(str _queryHash, str _entityName, \n        str _query, int _executionTime)\n    {\n        container stats;\n        int count, totalTime, avgTime;\n        \n        if (queryStatsMap.exists(_queryHash))\n        {\n            stats = queryStatsMap.lookup(_queryHash);\n            count = conPeek(stats, 1) + 1;\n            totalTime = conPeek(stats, 2) + _executionTime;\n        }\n        else\n        {\n            count = 1;\n            totalTime = _executionTime;\n        }\n        \n        avgTime = totalTime / count;\n        \n        stats = [count, totalTime, avgTime, _entityName, _query];\n        queryStatsMap.insert(_queryHash, stats);\n        \n        if (enableDetailedLogging)\n        {\n            info(strFmt(\"Virtual table query: %1, Time: %2ms, Avg: %3ms\",\n                _entityName, _executionTime, avgTime));\n        }\n    }\n\n    /// <summary>\n    /// Flag slow queries for optimization\n    /// </summary>\n    private void flagSlowQuery(str _entityName, str _query, int _time)\n    {\n        VirtualTableSlowQueryLog log;\n        \n        ttsbegin;\n        try\n        {\n            log.clear();\n            log.EntityName = _entityName;\n            log.QueryText = _query;\n            log.ExecutionTime = _time;\n            log.CreatedDateTime = DateTimeUtil::utcNow();\n            log.UserId = curUserId();\n            log.insert();\n            \n            warning(strFmt(\"Slow virtual table query detected: %1 (%2ms)\",\n                _entityName, _time));\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            error(\"Failed to log slow query\");\n        }\n    }\n\n    /// <summary>\n    /// Generate performance report\n    /// </summary>\n    public void generatePerformanceReport()\n    {\n        MapEnumerator enumerator = queryStatsMap.getEnumerator();\n        container stats;\n        str report = \"Virtual Table Performance Report:\\n\";\n        \n        while (enumerator.moveNext())\n        {\n            stats = enumerator.currentValue();\n            report += strFmt(\"Entity: %1, Count: %2, Avg Time: %3ms\\n\",\n                conPeek(stats, 4), // EntityName\n                conPeek(stats, 1), // Count\n                conPeek(stats, 3)  // AvgTime\n            );\n        }\n        \n        info(report);\n    }\n\n    /// <summary>\n    /// Placeholder for actual query execution\n    /// In reality, this would be integrated via CoC\n    /// </summary>\n    private void executeQuery(str _entityName, str _query)\n    {\n        // This method would be implemented as a Chain of Command\n        // on the appropriate DataEntityController method\n    }\n\n    /// <summary>\n    /// Log query failures for troubleshooting\n    /// </summary>\n    private void logQueryFailure(str _entityName, str _query, str _error)\n    {\n        System.Diagnostics.EventLog::writeEntry(\n            \"VirtualTableMonitor\",\n            strFmt(\"Query failed - Entity: %1, Error: %2\", \n                _entityName, _error),\n            System.Diagnostics.EventLogEntryType::Error);\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Virtual tables provide real-time F&O data access without synchronization, but query F&O directly on each request — optimize underlying data entities and indexes accordingly",
+        "Security is enforced through F&O's role-based system — virtual tables inherit all table-level and field-level security policies from the underlying data entities",
+        "Only published data entities can be exposed as virtual tables — ensure proper DMF entity configuration with appropriate keys, fields, and query optimization",
+        "Virtual tables are read-only by default — implement custom business logic in data entities rather than relying on Dataverse-side validation or transformation",
+        "Performance depends heavily on OData query efficiency — use $select, $filter, and $expand judiciously, and monitor query patterns for optimization opportunities"
+      ],
+      "gotchas": [
+        "Virtual tables don't support complex Dataverse features like calculated fields, rollup fields, or business process flows — these require dual-write or custom development workarounds",
+        "OData $expand operations can create N+1 query problems against F&O — explicitly design data entities with proper join strategies rather than relying on navigation properties",
+        "Virtual table metadata refresh is not automatic — schema changes in F&O data entities require manual refresh in the Dataverse admin center, potentially breaking Power Apps"
+      ],
+      "performance_tips": [
+        "Implement query result caching in custom data entities using the SysGlobalCache framework for frequently accessed, slowly changing data like currency rates or configuration values",
+        "Use explicit SQL joins in data entity select() methods rather than multiple separate queries — this reduces database round-trips and improves virtual table response times"
+      ],
+      "related_topics": [
+        "dual_write_sync",
+        "odata_services",
+        "data_entities"
+      ],
+      "quiz": [
+        {
+          "q": "What happens when a virtual table query includes a $expand operation on a navigation property?",
+          "options": [
+            "The query fails with an OData error",
+            "F&O executes multiple separate queries for each expanded entity",
+            "Dataverse automatically joins the data client-side",
+            "The expanded data is cached for future queries"
+          ],
+          "answer": 1,
+          "explanation": "OData $expand operations translate to multiple separate queries against F&O, potentially creating N+1 query performance issues. This is why explicit joins in data entity design are preferred over navigation property expansion."
+        },
+        {
+          "q": "Which F&O security mechanism primarily controls virtual table data access?",
+          "options": [
+            "Dataverse security roles and field security profiles",
+            "Azure AD application permissions and consent grants",
+            "F&O role-based security and SecurityPolicy framework",
+            "OData endpoint authentication and IP filtering"
+          ],
+          "answer": 2,
+          "explanation": "Virtual tables enforce F&O's native role-based security system. When Dataverse queries a virtual table, F&O applies all table-level and field-level security policies as if the user was directly accessing F&O through the client."
+        },
+        {
+          "q": "What is the primary architectural difference between virtual tables and dual-write for data integration?",
+          "options": [
+            "Virtual tables support bidirectional sync while dual-write is unidirectional",
+            "Virtual tables store data in Dataverse while dual-write queries F&O directly",
+            "Virtual tables query F&O in real-time while dual-write maintains synchronized copies",
+            "Virtual tables require custom code while dual-write works out-of-the-box"
+          ],
+          "answer": 2,
+          "explanation": "Virtual tables provide real-time access by querying F&O directly on each request, while dual-write maintains separate synchronized copies of data in both systems. This makes virtual tables ideal for scenarios requiring immediate data consistency."
+        }
+      ]
+    },
+    "generated_date": "2026-04-17",
+    "auto_generated": true
   }
 ]

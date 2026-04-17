@@ -1,1 +1,1 @@
-Power Automate + D365 F&O Connectors
+Dataverse Link & Virtual Tables

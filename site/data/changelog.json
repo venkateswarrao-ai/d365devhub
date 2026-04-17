@@ -1,5 +1,13 @@
 [
   {
+    "date": "Apr 17",
+    "tag": "LESSON",
+    "title": "Dataverse Link & Virtual Tables",
+    "section": "Integrations",
+    "level": "Expert",
+    "id": "int_dataverse_link"
+  },
+  {
     "date": "Apr 16",
     "tag": "LESSON",
     "title": "Power Automate + D365 F&O Connectors",
@@ -230,13 +238,5 @@
     "section": "X++ Language",
     "level": "Beginner",
     "id": "xpp_label_files"
-  },
-  {
-    "date": "Mar 18",
-    "tag": "LESSON",
-    "title": "Global Class & Utility Methods",
-    "section": "X++ Language",
-    "level": "Beginner",
-    "id": "xpp_global_class"
   }
 ]

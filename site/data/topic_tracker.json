@@ -1,5 +1,5 @@
 {
-  "last_index": 43,
+  "last_index": 44,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -56,9 +56,10 @@
     "int_azure_data_lake",
     "int_webhooks",
     "int_oauth_d365",
-    "perf_query_optimize"
+    "perf_query_optimize",
+    "perf_set_based"
   ],
-  "last_run": "2026-04-21",
-  "last_title": "Query Optimization: Indexes & Plans",
+  "last_run": "2026-04-22",
+  "last_title": "Set-Based vs Row-Based Operations",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

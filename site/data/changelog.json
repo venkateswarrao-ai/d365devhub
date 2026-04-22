@@ -1,5 +1,13 @@
 [
   {
+    "date": "Apr 22",
+    "tag": "LESSON",
+    "title": "Set-Based vs Row-Based Operations",
+    "section": "Architecture",
+    "level": "Expert",
+    "id": "perf_set_based"
+  },
+  {
     "date": "Apr 21",
     "tag": "LESSON",
     "title": "Query Optimization: Indexes & Plans",
@@ -230,13 +238,5 @@
     "section": "X++ Language",
     "level": "Expert",
     "id": "xpp_optimistic_concur"
-  },
-  {
-    "date": "Mar 23",
-    "tag": "LESSON",
-    "title": "delete_from & Bulk Operations",
-    "section": "X++ Language",
-    "level": "Intermediate",
-    "id": "xpp_delete_from"
   }
 ]

@@ -4347,5 +4347,108 @@
     },
     "generated_date": "2026-04-21",
     "auto_generated": true
+  },
+  {
+    "id": "perf_set_based",
+    "title": "Set-Based vs Row-Based Operations",
+    "section": "Architecture",
+    "level": "Expert",
+    "duration": "18 min read",
+    "tags": [
+      "performance",
+      "sql",
+      "optimization",
+      "query",
+      "bulk-operations"
+    ],
+    "summary": "Master the critical architectural difference between set-based and row-based operations in D365 F&O to achieve dramatic performance improvements.",
+    "content": {
+      "overview": "Set-based operations are fundamental to achieving optimal performance in D365 F&O, yet many developers default to row-based patterns that can destroy system scalability. The difference between processing 10,000 records in 200ms versus 45 minutes often comes down to this single architectural decision. In D365 F&O's three-tier architecture, set-based operations leverage SQL Server's strengths by minimizing round-trips between the AOS and database tiers, while row-based operations create excessive network chatter and context switching overhead. Understanding when and how to implement each pattern is crucial for enterprise-grade solutions that must handle millions of transactions efficiently.",
+      "theory": "D365 F&O's query execution follows a sophisticated path through multiple architectural layers. When you execute a set-based operation using select statements with joins, the X++ runtime translates these into optimized SQL queries that execute entirely on the database tier. The Query framework (Query, QueryBuildDataSource, QueryBuildRange classes) generates parameterized SQL with proper indexing hints, allowing SQL Server's query optimizer to create efficient execution plans. Conversely, row-based operations using while select or forupdate loops force the AOS to fetch individual records, process business logic, and make separate database calls for each iteration. This pattern fragments the operation across tiers, prevents SQL Server from optimizing the entire operation, and creates transaction log overhead that can cause blocking in high-concurrency scenarios. The RecordInsertList and RecordSortedList classes provide hybrid approaches that batch multiple row operations into set-based database calls, offering middle-ground solutions when pure set-based operations aren't feasible due to business logic requirements.",
+      "code_examples": [
+        {
+          "title": "Anti-Pattern: Row-Based Inventory Update",
+          "description": "Demonstrates the performance disaster of row-based operations with proper transaction handling but inefficient data access patterns",
+          "language": "xpp",
+          "code": "/// <summary>\n/// ANTI-PATTERN: Row-based inventory update - processes each record individually\n/// This will perform terribly with large datasets (>1000 records)\n/// </summary>\nstatic void RowBasedInventoryUpdate()\n{\n    InventTable         inventTable;\n    InventItemLocation  inventItemLocation;\n    Counter             recordCount = 0;\n    utcdatetime         startTime = DateTimeUtil::utcNow();\n    \n    try\n    {\n        ttsbegin;\n        \n        // Row-based approach: fetch each inventory item individually\n        while select forupdate inventTable\n            where inventTable.ItemType == ItemType::Item\n               && inventTable.ItemGroupId == 'Audio'\n        {\n            // For each item, make separate query for location data\n            select firstonly inventItemLocation\n                where inventItemLocation.ItemId == inventTable.ItemId\n                   && inventItemLocation.InventLocationId == '11';\n            \n            if (inventItemLocation.RecId)\n            {\n                // Individual update per record - expensive!\n                inventTable.ModifiedDateTime = DateTimeUtil::utcNow();\n                inventTable.update();\n                recordCount++;\n                \n                // Artificial business logic to simulate processing\n                if (recordCount % 100 == 0)\n                {\n                    info(strFmt(\"Processed %1 records (row-based)\", recordCount));\n                }\n            }\n        }\n        \n        ttscommit;\n        \n        info(strFmt(\"Row-based update completed: %1 records in %2 ms\", \n             recordCount, \n             DateTimeUtil::getDifference(DateTimeUtil::utcNow(), startTime)));\n    }\n    catch (Exception::Error)\n    {\n        ttsabort;\n        error(\"Row-based update failed: \" + infolog.text());\n        throw Exception::Error;\n    }\n}"
+        },
+        {
+          "title": "Optimized: Set-Based Inventory Update",
+          "description": "Shows proper set-based approach using joins and update_recordset for dramatic performance improvement",
+          "language": "xpp",
+          "code": "/// <summary>\n/// OPTIMIZED: Set-based inventory update using SQL joins and update_recordset\n/// Processes thousands of records in single SQL statement\n/// </summary>\nstatic void SetBasedInventoryUpdate()\n{\n    InventTable         inventTable;\n    InventItemLocation  inventItemLocation;\n    utcdatetime         startTime = DateTimeUtil::utcNow();\n    int64               recordsAffected;\n    \n    try\n    {\n        ttsbegin;\n        \n        // Set-based approach: single SQL statement with JOIN\n        update_recordset inventTable\n            setting ModifiedDateTime = DateTimeUtil::utcNow()\n            exists join inventItemLocation\n                where inventItemLocation.ItemId == inventTable.ItemId\n                   && inventItemLocation.InventLocationId == '11'\n            where inventTable.ItemType == ItemType::Item\n               && inventTable.ItemGroupId == 'Audio';\n        \n        // Get affected row count for reporting\n        recordsAffected = inventTable.RowCount();\n        \n        ttscommit;\n        \n        info(strFmt(\"Set-based update completed: %1 records in %2 ms\", \n             recordsAffected, \n             DateTimeUtil::getDifference(DateTimeUtil::utcNow(), startTime)));\n    }\n    catch (Exception::Error)\n    {\n        ttsabort;\n        error(\"Set-based update failed: \" + infolog.text());\n        throw Exception::Error;\n    }\n}"
+        },
+        {
+          "title": "Hybrid Approach: RecordInsertList for Complex Logic",
+          "description": "Demonstrates when row-based logic is necessary but can be optimized using RecordInsertList for batch inserts",
+          "language": "xpp",
+          "code": "/// <summary>\n/// HYBRID: Using RecordInsertList when business logic prevents pure set-based operations\n/// Batches individual operations into efficient bulk inserts\n/// </summary>\nstatic void HybridBulkInventoryJournal()\n{\n    InventJournalTable      journalTable;\n    InventJournalTrans      journalTrans, journalTransLocal;\n    InventTable             inventTable;\n    RecordInsertList        insertList;\n    InventDim               inventDim;\n    Counter                 processedCount = 0;\n    utcdatetime             startTime = DateTimeUtil::utcNow();\n    \n    try\n    {\n        ttsbegin;\n        \n        // Create journal header first\n        journalTable.clear();\n        journalTable.JournalId = JournalTableData::newTable(journalTable).nextJournalId();\n        journalTable.JournalType = InventJournalType::Movement;\n        journalTable.JournalNameId = 'IMov';\n        journalTable.Description = 'Bulk movement journal';\n        journalTable.insert();\n        \n        // Initialize RecordInsertList for batch processing\n        insertList = new RecordInsertList(\n            tableNum(InventJournalTrans),\n            false,  // skipDatabaseLog\n            false,  // skipEvents\n            false,  // skipAosValidation\n            false,  // skipRlsValidation\n            false,  // skipRlsValidation\n            false); // skipDeleteActions\n        \n        // Row-based logic for complex calculations, but batched inserts\n        while select inventTable\n            where inventTable.ItemType == ItemType::Item\n               && inventTable.ItemGroupId == 'Audio'\n        {\n            // Complex business logic that can't be done in SQL\n            InventDim inventDimLocal = InventDim::findOrCreate(inventDim);\n            \n            journalTransLocal.clear();\n            journalTransLocal.JournalId = journalTable.JournalId;\n            journalTransLocal.ItemId = inventTable.ItemId;\n            journalTransLocal.InventDimId = inventDimLocal.inventDimId;\n            journalTransLocal.Qty = 100; // Business calculation would go here\n            journalTransLocal.CostPrice = 15.50; // Complex pricing logic\n            journalTransLocal.TransDate = today();\n            \n            // Add to batch instead of individual insert\n            insertList.add(journalTransLocal);\n            processedCount++;\n            \n            // Process in chunks of 1000 to manage memory\n            if (processedCount % 1000 == 0)\n            {\n                insertList.insertDatabase();\n                info(strFmt(\"Processed %1 records\", processedCount));\n            }\n        }\n        \n        // Insert remaining records\n        insertList.insertDatabase();\n        \n        ttscommit;\n        \n        info(strFmt(\"Hybrid bulk insert completed: %1 records in %2 ms\", \n             processedCount, \n             DateTimeUtil::getDifference(DateTimeUtil::utcNow(), startTime)));\n    }\n    catch (Exception::Error)\n    {\n        ttsabort;\n        if (insertList)\n        {\n            insertList = null; // Cleanup\n        }\n        error(\"Hybrid bulk operation failed: \" + infolog.text());\n        throw Exception::Error;\n    }\n}"
+        },
+        {
+          "title": "Query Framework Optimization",
+          "description": "Advanced set-based querying using the Query framework with proper indexing hints and execution plan optimization",
+          "language": "xpp",
+          "code": "/// <summary>\n/// ADVANCED: Query framework optimization for complex set-based operations\n/// Demonstrates proper use of query hints and execution plan control\n/// </summary>\nstatic void OptimizedQueryFrameworkExample()\n{\n    Query                   query;\n    QueryRun                queryRun;\n    QueryBuildDataSource    qbdsInventTable, qbdsInventItemLocation, qbdsInventDim;\n    QueryBuildRange         qbrItemGroup, qbrLocation;\n    InventTable             inventTable;\n    Counter                 recordCount = 0;\n    utcdatetime             startTime = DateTimeUtil::utcNow();\n    \n    try\n    {\n        // Build optimized query with proper join strategy\n        query = new Query();\n        \n        // Primary data source with index hint\n        qbdsInventTable = query.addDataSource(tableNum(InventTable));\n        qbdsInventTable.addRange(fieldNum(InventTable, ItemType)).value('0'); // ItemType::Item\n        qbdsInventTable.orderBy(fieldNum(InventTable, ItemId));\n        qbdsInventTable.addSelectionField(fieldNum(InventTable, ItemId));\n        qbdsInventTable.addSelectionField(fieldNum(InventTable, ItemGroupId));\n        \n        // Optimized join - use exists join for better performance\n        qbdsInventItemLocation = qbdsInventTable.addDataSource(tableNum(InventItemLocation));\n        qbdsInventItemLocation.relations(true);\n        qbdsInventItemLocation.joinMode(JoinMode::ExistsJoin);\n        qbdsInventItemLocation.addRange(fieldNum(InventItemLocation, InventLocationId)).value('11');\n        \n        // Additional exists join for inventory dimensions if needed\n        qbdsInventDim = qbdsInventItemLocation.addDataSource(tableNum(InventDim));\n        qbdsInventDim.relations(true);\n        qbdsInventDim.joinMode(JoinMode::ExistsJoin);\n        \n        // Range with IN operator for better SQL generation\n        qbrItemGroup = qbdsInventTable.addRange(fieldNum(InventTable, ItemGroupId));\n        qbrItemGroup.value('Audio,Parts,Service');\n        \n        // Execute with query plan caching\n        queryRun = new QueryRun(query);\n        queryRun.setCursor(); // Enable cursor for large result sets\n        \n        info(\"Generated SQL: \" + queryRun.query().dataSourceTable(tableNum(InventTable)).toString());\n        \n        // Process results efficiently\n        while (queryRun.next())\n        {\n            inventTable = queryRun.get(tableNum(InventTable));\n            recordCount++;\n            \n            // Process record (read-only operations)\n            if (recordCount % 1000 == 0)\n            {\n                info(strFmt(\"Processed %1 records\", recordCount));\n            }\n        }\n        \n        info(strFmt(\"Query framework execution completed: %1 records in %2 ms\", \n             recordCount, \n             DateTimeUtil::getDifference(DateTimeUtil::utcNow(), startTime)));\n    }\n    catch (Exception::Error)\n    {\n        error(\"Query framework execution failed: \" + infolog.text());\n        throw Exception::Error;\n    }\n    finally\n    {\n        if (queryRun)\n        {\n            queryRun.close();\n        }\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Set-based operations execute as single SQL statements on the database tier, while row-based operations create multiple round-trips between AOS and SQL Server",
+        "Use update_recordset, insert_recordset, and delete_from statements instead of while select loops for bulk data modifications",
+        "RecordInsertList and RecordSortedList provide hybrid solutions when business logic prevents pure set-based operations but bulk processing is still needed",
+        "Query framework with proper joins (especially exists joins) generates optimized SQL execution plans and enables query plan caching",
+        "Transaction scope dramatically affects performance — set-based operations can complete entire datasets in single transactions, while row-based operations fragment transaction logs"
+      ],
+      "gotchas": [
+        "while select forupdate creates shared locks on every row that can cause deadlocks in multi-user scenarios — use update_recordset with proper WHERE clauses instead",
+        "RecordInsertList must be explicitly called with insertDatabase() and properly disposed — forgotten calls leave data in memory without persisting to database",
+        "Set-based operations bypass X++ validation and events on table methods — ensure business rules are enforced at the SQL level or use validateWrite() patterns appropriately"
+      ],
+      "performance_tips": [
+        "Measure actual execution time and SQL query plans using SQL Server Profiler or Extended Events rather than assuming performance improvements",
+        "For datasets larger than 10,000 records, set-based operations typically perform 50-100x faster than equivalent row-based operations due to reduced context switching and network overhead"
+      ],
+      "related_topics": [
+        "xpp_select",
+        "xpp_tables",
+        "xpp_batch"
+      ],
+      "quiz": [
+        {
+          "q": "Which X++ statement should you use to update 50,000 inventory records in a single operation?",
+          "options": [
+            "while select forupdate with individual update() calls",
+            "update_recordset with appropriate WHERE clause",
+            "for loop with select and update() calls",
+            "RecordInsertList for each record"
+          ],
+          "answer": 1,
+          "explanation": "Why B is correct: update_recordset generates a single SQL UPDATE statement that processes all matching records in one database operation, avoiding the overhead of 50,000 individual round-trips to the database that would occur with row-based approaches."
+        },
+        {
+          "q": "What is the primary architectural benefit of set-based operations in D365 F&O?",
+          "options": [
+            "They use less memory on the AOS server",
+            "They minimize round-trips between AOS and database tiers",
+            "They automatically handle transaction rollbacks",
+            "They bypass security permissions"
+          ],
+          "answer": 1,
+          "explanation": "Why B is correct: Set-based operations execute entirely on the database tier as optimized SQL statements, eliminating the network latency and context switching overhead that occurs when the AOS must fetch and process individual records in row-based patterns."
+        },
+        {
+          "q": "When should you use RecordInsertList instead of pure set-based operations?",
+          "options": [
+            "Always, for better performance",
+            "When you need complex business logic per record but want batched inserts",
+            "Only for small datasets under 100 records",
+            "When working with temporary tables"
+          ],
+          "answer": 1,
+          "explanation": "Why B is correct: RecordInsertList provides a hybrid approach where you can execute row-by-row business logic (calculations, validations) in X++ but batch the actual database inserts for better performance than individual insert() calls while maintaining the ability to apply complex business rules."
+        }
+      ]
+    },
+    "generated_date": "2026-04-22",
+    "auto_generated": true
   }
 ]

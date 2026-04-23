@@ -1,5 +1,5 @@
 {
-  "last_index": 44,
+  "last_index": 45,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -57,9 +57,10 @@
     "int_webhooks",
     "int_oauth_d365",
     "perf_query_optimize",
-    "perf_set_based"
+    "perf_set_based",
+    "perf_caching"
   ],
-  "last_run": "2026-04-22",
-  "last_title": "Set-Based vs Row-Based Operations",
+  "last_run": "2026-04-23",
+  "last_title": "Table Caching: EntireTable vs Found",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

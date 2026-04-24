@@ -1,5 +1,13 @@
 [
   {
+    "date": "Apr 24",
+    "tag": "LESSON",
+    "title": "Async Processing & Task Parallelism",
+    "section": "Architecture",
+    "level": "Expert",
+    "id": "perf_async_batch"
+  },
+  {
     "date": "Apr 23",
     "tag": "LESSON",
     "title": "Table Caching: EntireTable vs Found",
@@ -230,13 +238,5 @@
     "section": "Extensions",
     "level": "Intermediate",
     "id": "ext_form_datasource"
-  },
-  {
-    "date": "Mar 25",
-    "tag": "LESSON",
-    "title": "Table Extensions: Add Fields & Indexes",
-    "section": "Extensions",
-    "level": "Intermediate",
-    "id": "ext_table_extension"
   }
 ]

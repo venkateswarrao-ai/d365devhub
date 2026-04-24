@@ -4548,5 +4548,102 @@
     },
     "generated_date": "2026-04-23",
     "auto_generated": true
+  },
+  {
+    "id": "perf_async_batch",
+    "title": "Async Processing & Task Parallelism",
+    "section": "Architecture",
+    "level": "Expert",
+    "duration": "25 min read",
+    "tags": [
+      "async",
+      "parallelism",
+      "performance",
+      "threading",
+      "batch"
+    ],
+    "summary": "Master advanced async processing patterns in D365 F&O using System.Threading.Tasks, parallel batch execution, and proper thread synchronization for high-performance operations.",
+    "content": {
+      "overview": "D365 F&O's X++ runtime supports async/await patterns through interop with .NET's Task Parallel Library (TPL), enabling developers to build responsive applications that can handle I/O-bound operations efficiently. Unlike traditional synchronous batch jobs that block execution, async processing allows multiple operations to run concurrently while maintaining proper transaction boundaries and error handling.\n\nThis becomes critical when dealing with external service calls, large data imports, or computationally intensive operations that can benefit from parallel execution. However, async programming in D365 F&O requires careful consideration of AOS session limits, database connection pooling, and the unique constraints of the X++ runtime environment.\n\nThe key is understanding when to use true parallelism versus async I/O, how to properly manage resources across multiple threads, and how to integrate async patterns with D365's existing batch framework and SysOperation patterns.",
+      "theory": "D365 F&O's async processing leverages .NET interop through the CLRObject class to access System.Threading.Tasks.Task and related TPL components. The X++ runtime operates on a single-threaded model per AOS session, but can spawn multiple sessions or use .NET tasks for parallel execution. The AsyncTaskHelper class provides utilities for managing async operations within the D365 context.\n\nThe architecture involves several key components: System.Threading.Tasks.Task for basic async operations, System.Threading.Tasks.Parallel for CPU-bound parallel work, and custom wrapper classes like AsyncBatchProcessor that handle D365-specific concerns like transaction management and error aggregation. The SysOperationServiceController can be extended to support async batch processing patterns.\n\nCritical considerations include managing AOS session affinity (tasks may not have access to the original session context), handling transaction boundaries across async operations, and ensuring proper cleanup of resources. The Global class provides utilities for cross-session data sharing, while the Info class's batch-aware methods ensure proper logging in async contexts.",
+      "code_examples": [
+        {
+          "title": "Basic Async Service Call with Error Handling",
+          "description": "Demonstrates async HTTP calls using .NET interop with proper resource management and D365 logging",
+          "language": "xpp",
+          "code": "using System.Threading.Tasks;\nusing System.Net.Http;\n\nclass AsyncServiceHelper\n{\n    public static async Task<str> callExternalServiceAsync(str endpoint, str jsonData)\n    {\n        System.Net.Http.HttpClient httpClient;\n        System.Net.Http.StringContent content;\n        System.Net.Http.HttpResponseMessage response;\n        str result;\n        \n        try\n        {\n            httpClient = new System.Net.Http.HttpClient();\n            content = new System.Net.Http.StringContent(jsonData);\n            content.Headers.Add('Content-Type', 'application/json');\n            \n            response = await httpClient.PostAsync(endpoint, content);\n            \n            if (response.IsSuccessStatusCode)\n            {\n                result = await response.Content.ReadAsStringAsync();\n                info(strFmt(\"Service call successful: %1\", result));\n            }\n            else\n            {\n                error(strFmt(\"Service call failed with status: %1\", response.StatusCode));\n                result = '';\n            }\n        }\n        catch (System.Exception ex)\n        {\n            error(strFmt(\"Exception in async service call: %1\", ex.Message));\n            result = '';\n        }\n        finally\n        {\n            if (httpClient)\n                httpClient.Dispose();\n        }\n        \n        return result;\n    }\n    \n    public static void runMultipleServiceCallsAsync()\n    {\n        List endpoints = new List(Types::String);\n        System.Threading.Tasks.Task[] tasks;\n        int i;\n        \n        endpoints.addEnd('https://api.service1.com/data');\n        endpoints.addEnd('https://api.service2.com/data');\n        endpoints.addEnd('https://api.service3.com/data');\n        \n        tasks = new System.Threading.Tasks.Task[endpoints.elements()]();\n        \n        for (i = 1; i <= endpoints.elements(); i++)\n        {\n            tasks[i-1] = AsyncServiceHelper::callExternalServiceAsync(endpoints.value(i), '{}');\n        }\n        \n        System.Threading.Tasks.Task::WaitAll(tasks);\n        info(\"All service calls completed\");\n    }\n}"
+        },
+        {
+          "title": "Parallel Batch Processing with Transaction Management",
+          "description": "Advanced parallel processing of large datasets with proper transaction boundaries and progress tracking",
+          "language": "xpp",
+          "code": "class ParallelBatchProcessor extends RunBaseBatch\n{\n    private int batchSize = 1000;\n    private int maxDegreeOfParallelism = 4;\n    \n    protected void run()\n    {\n        CustTable custTable;\n        System.Collections.Generic.List<System.Object> customerBatches;\n        System.Threading.Tasks.ParallelOptions parallelOptions;\n        System.Threading.CancellationTokenSource cancellationTokenSource;\n        int totalRecords;\n        Counter processedRecords;\n        \n        try\n        {\n            // Count total records for progress tracking\n            select count(RecId) from custTable;\n            totalRecords = custTable.RecId;\n            \n            if (totalRecords == 0)\n            {\n                info(\"No customer records to process\");\n                return;\n            }\n            \n            customerBatches = this.createCustomerBatches();\n            cancellationTokenSource = new System.Threading.CancellationTokenSource();\n            \n            parallelOptions = new System.Threading.Tasks.ParallelOptions();\n            parallelOptions.MaxDegreeOfParallelism = maxDegreeOfParallelism;\n            parallelOptions.CancellationToken = cancellationTokenSource.Token;\n            \n            System.Threading.Tasks.Parallel::ForEach(\n                customerBatches,\n                parallelOptions,\n                new System.Action<System.Object>(this, staticDelegateMethodStr(ParallelBatchProcessor, processBatchDelegate))\n            );\n            \n            info(strFmt(\"Parallel processing completed for %1 customers\", totalRecords));\n        }\n        catch (System.OperationCanceledException ex)\n        {\n            warning(\"Batch processing was cancelled\");\n        }\n        catch (System.AggregateException ex)\n        {\n            error(strFmt(\"Multiple errors occurred during parallel processing: %1\", ex.Message));\n            // Log individual exceptions\n            var innerExceptions = ex.InnerExceptions.GetEnumerator();\n            while (innerExceptions.MoveNext())\n            {\n                error(strFmt(\"Inner exception: %1\", innerExceptions.Current.Message));\n            }\n        }\n        catch (Exception ex)\n        {\n            error(strFmt(\"Unexpected error in parallel batch processing: %1\", ex.Message));\n        }\n    }\n    \n    private System.Collections.Generic.List<System.Object> createCustomerBatches()\n    {\n        CustTable custTable;\n        System.Collections.Generic.List<System.Object> batches;\n        System.Collections.Generic.List<System.String> currentBatch;\n        Counter batchCount;\n        \n        batches = new System.Collections.Generic.List<System.Object>();\n        currentBatch = new System.Collections.Generic.List<System.String>();\n        \n        while select AccountNum from custTable\n        {\n            currentBatch.Add(custTable.AccountNum);\n            batchCount++;\n            \n            if (batchCount >= batchSize)\n            {\n                batches.Add(currentBatch);\n                currentBatch = new System.Collections.Generic.List<System.String>();\n                batchCount = 0;\n            }\n        }\n        \n        // Add remaining records\n        if (currentBatch.Count > 0)\n        {\n            batches.Add(currentBatch);\n        }\n        \n        return batches;\n    }\n    \n    public static void processBatchDelegate(System.Object batch)\n    {\n        System.Collections.Generic.List<System.String> customerBatch;\n        CustTable custTable;\n        str accountNum;\n        \n        customerBatch = batch as System.Collections.Generic.List<System.String>;\n        \n        if (!customerBatch)\n            return;\n            \n        try\n        {\n            ttsbegin;\n            \n            var enumerator = customerBatch.GetEnumerator();\n            while (enumerator.MoveNext())\n            {\n                accountNum = enumerator.Current;\n                \n                select forUpdate custTable\n                    where custTable.AccountNum == accountNum;\n                    \n                if (custTable)\n                {\n                    // Simulate complex processing\n                    custTable.LastProcessedDateTime = DateTimeUtil::utcNow();\n                    custTable.update();\n                }\n            }\n            \n            ttscommit;\n            info(strFmt(\"Processed batch of %1 customers in thread %2\", \n                       customerBatch.Count, \n                       System.Threading.Thread::CurrentThread.ManagedThreadId));\n        }\n        catch (Exception ex)\n        {\n            ttsabort;\n            error(strFmt(\"Error processing customer batch: %1\", ex.Message));\n            throw ex;\n        }\n    }\n    \n    public static void main(Args _args)\n    {\n        ParallelBatchProcessor processor = new ParallelBatchProcessor();\n        \n        if (processor.prompt())\n        {\n            processor.run();\n        }\n    }\n}"
+        },
+        {
+          "title": "Producer-Consumer Pattern with Async Queues",
+          "description": "Implementation of async producer-consumer pattern for handling high-throughput data processing scenarios",
+          "language": "xpp",
+          "code": "using System.Collections.Concurrent;\nusing System.Threading.Tasks;\nusing System.Threading;\n\nclass AsyncQueueProcessor\n{\n    private System.Collections.Concurrent.ConcurrentQueue<System.Object> workQueue;\n    private System.Threading.CancellationTokenSource cancellationTokenSource;\n    private System.Threading.Tasks.Task[] consumerTasks;\n    private boolean isProcessing;\n    \n    public void new()\n    {\n        workQueue = new System.Collections.Concurrent.ConcurrentQueue<System.Object>();\n        cancellationTokenSource = new System.Threading.CancellationTokenSource();\n        isProcessing = false;\n    }\n    \n    public void startProcessing(int consumerCount = 3)\n    {\n        if (isProcessing)\n        {\n            warning(\"Processing is already running\");\n            return;\n        }\n        \n        isProcessing = true;\n        consumerTasks = new System.Threading.Tasks.Task[consumerCount]();\n        \n        for (int i = 0; i < consumerCount; i++)\n        {\n            consumerTasks[i] = System.Threading.Tasks.Task::Run(\n                new System.Action(this, methodStr(AsyncQueueProcessor, consumerWorker))\n            );\n        }\n        \n        info(strFmt(\"Started %1 consumer tasks\", consumerCount));\n    }\n    \n    public void enqueueWork(System.Object workItem)\n    {\n        if (!isProcessing)\n        {\n            error(\"Cannot enqueue work - processing not started\");\n            return;\n        }\n        \n        workQueue.Enqueue(workItem);\n    }\n    \n    public async Task stopProcessingAsync()\n    {\n        if (!isProcessing)\n            return;\n            \n        cancellationTokenSource.Cancel();\n        \n        try\n        {\n            await System.Threading.Tasks.Task::WhenAll(consumerTasks);\n        }\n        catch (System.OperationCanceledException)\n        {\n            // Expected when cancellation is requested\n        }\n        \n        isProcessing = false;\n        info(\"All consumer tasks completed\");\n    }\n    \n    private void consumerWorker()\n    {\n        System.Object workItem;\n        boolean hasItem;\n        int threadId = System.Threading.Thread::CurrentThread.ManagedThreadId;\n        \n        info(strFmt(\"Consumer thread %1 started\", threadId));\n        \n        while (!cancellationTokenSource.Token.IsCancellationRequested)\n        {\n            try\n            {\n                hasItem = workQueue.TryDequeue(workItem);\n                \n                if (hasItem && workItem)\n                {\n                    this.processWorkItem(workItem, threadId);\n                }\n                else\n                {\n                    // No work available, wait briefly before checking again\n                    System.Threading.Thread::Sleep(100);\n                }\n            }\n            catch (Exception ex)\n            {\n                error(strFmt(\"Error in consumer thread %1: %2\", threadId, ex.Message));\n            }\n        }\n        \n        info(strFmt(\"Consumer thread %1 shutting down\", threadId));\n    }\n    \n    private void processWorkItem(System.Object workItem, int threadId)\n    {\n        // Simulate work processing\n        VendTable vendTable;\n        str vendAccount = workItem as System.String;\n        \n        if (!vendAccount)\n            return;\n            \n        try\n        {\n            ttsbegin;\n            \n            select forUpdate vendTable\n                where vendTable.AccountNum == vendAccount;\n                \n            if (vendTable)\n            {\n                vendTable.LastProcessedDateTime = DateTimeUtil::utcNow();\n                vendTable.ProcessedByThread = threadId;\n                vendTable.update();\n                \n                info(strFmt(\"Processed vendor %1 in thread %2\", vendAccount, threadId));\n            }\n            \n            ttscommit;\n        }\n        catch (Exception ex)\n        {\n            ttsabort;\n            error(strFmt(\"Failed to process vendor %1 in thread %2: %3\", \n                        vendAccount, threadId, ex.Message));\n        }\n    }\n    \n    public static void demonstrateProducerConsumer()\n    {\n        AsyncQueueProcessor processor = new AsyncQueueProcessor();\n        VendTable vendTable;\n        List vendorAccounts = new List(Types::String);\n        \n        // Collect vendor accounts to process\n        while select AccountNum from vendTable\n        {\n            vendorAccounts.addEnd(vendTable.AccountNum);\n            \n            if (vendorAccounts.elements() >= 100) // Limit for demo\n                break;\n        }\n        \n        processor.startProcessing(4); // 4 consumer threads\n        \n        // Produce work items\n        for (int i = 1; i <= vendorAccounts.elements(); i++)\n        {\n            processor.enqueueWork(vendorAccounts.value(i));\n        }\n        \n        info(strFmt(\"Enqueued %1 vendor accounts for processing\", vendorAccounts.elements()));\n        \n        // Let processing run for a while, then stop\n        System.Threading.Thread::Sleep(5000);\n        \n        processor.stopProcessingAsync();\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Use .NET Task Parallel Library (TPL) through CLRObject for async operations — leverage System.Threading.Tasks.Task and Parallel classes for concurrent execution",
+        "Manage transaction boundaries carefully in parallel processing — use separate ttsbegin/ttscommit blocks per thread to avoid distributed transaction issues",
+        "Implement proper cancellation patterns with CancellationTokenSource — allows graceful shutdown of long-running async operations",
+        "Consider AOS session limits and connection pooling — each parallel task may require its own database connection, plan capacity accordingly",
+        "Use producer-consumer patterns for high-throughput scenarios — decouple data production from processing to maximize resource utilization"
+      ],
+      "gotchas": [
+        "Never share database cursors across threads — each thread needs its own select statements and table buffers to avoid concurrency violations",
+        "Avoid using static variables in async contexts — multiple threads accessing static state can cause race conditions and data corruption",
+        "Don't forget to dispose of .NET objects properly — use try/finally or using patterns to prevent memory leaks in long-running batch jobs"
+      ],
+      "performance_tips": [
+        "Use Parallel.ForEach with MaxDegreeOfParallelism to control resource consumption — prevents overwhelming the database with too many concurrent connections",
+        "Batch database operations within each parallel task — reduces transaction overhead and improves overall throughput compared to single-record processing"
+      ],
+      "related_topics": [
+        "xpp_batch",
+        "xpp_sysoperation",
+        "perf_database"
+      ],
+      "quiz": [
+        {
+          "q": "What is the primary concern when using ttsbegin/ttscommit in parallel processing scenarios?",
+          "options": [
+            "Performance overhead",
+            "Each thread needs separate transaction boundaries",
+            "Memory consumption",
+            "Network latency"
+          ],
+          "answer": 1,
+          "explanation": "Each thread needs separate transaction boundaries because D365 F&O doesn't support distributed transactions across multiple threads. Sharing transaction context leads to deadlocks and data inconsistencies."
+        },
+        {
+          "q": "Which .NET class should you use to implement cancellation in long-running async operations?",
+          "options": [
+            "CancellationTokenSource",
+            "TaskCompletionSource",
+            "ManualResetEvent",
+            "SemaphoreSlim"
+          ],
+          "answer": 0,
+          "explanation": "CancellationTokenSource provides the standard .NET pattern for cooperative cancellation, allowing async operations to be gracefully terminated without forcing thread abortion."
+        },
+        {
+          "q": "What happens if you share a table buffer (like CustTable) across multiple parallel threads?",
+          "options": [
+            "Improved performance",
+            "Automatic synchronization",
+            "Race conditions and data corruption",
+            "Reduced memory usage"
+          ],
+          "answer": 2,
+          "explanation": "Table buffers are not thread-safe. Sharing them across threads causes race conditions where one thread's changes can overwrite another's, leading to data corruption and unpredictable behavior."
+        }
+      ]
+    },
+    "generated_date": "2026-04-24",
+    "auto_generated": true
   }
 ]

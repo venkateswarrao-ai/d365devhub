@@ -1,5 +1,5 @@
 {
-  "last_index": 45,
+  "last_index": 46,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -58,9 +58,10 @@
     "int_oauth_d365",
     "perf_query_optimize",
     "perf_set_based",
-    "perf_caching"
+    "perf_caching",
+    "perf_async_batch"
   ],
-  "last_run": "2026-04-23",
-  "last_title": "Table Caching: EntireTable vs Found",
+  "last_run": "2026-04-24",
+  "last_title": "Async Processing & Task Parallelism",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

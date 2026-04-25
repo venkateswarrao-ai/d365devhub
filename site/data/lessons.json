@@ -4645,5 +4645,96 @@
     },
     "generated_date": "2026-04-24",
     "auto_generated": true
+  },
+  {
+    "id": "arch_isv_design",
+    "title": "ISV Solution Design & AppSource",
+    "section": "Architecture",
+    "level": "Expert",
+    "duration": "25 min read",
+    "tags": [
+      "ISV",
+      "AppSource",
+      "Solution Design",
+      "Packaging",
+      "Licensing"
+    ],
+    "summary": "Comprehensive guide to designing, developing, and publishing ISV solutions for Microsoft AppSource with focus on architecture patterns, licensing models, and deployment strategies.",
+    "content": {
+      "overview": "Building ISV solutions for D365 F&O requires fundamentally different architectural decisions compared to internal customizations. You must design for multi-tenancy, handle licensing validation, implement proper configuration management, and ensure clean upgrade paths across D365 versions. ISV solutions published to AppSource face strict certification requirements including no overlayering, proper error handling, telemetry integration, and adherence to Microsoft's security standards.\n\nSuccessful ISV solutions leverage extension points like Chain of Command, Event Handlers, and Plug-ins while avoiding any modifications to standard objects. The architecture must support configuration-driven functionality, tenant-specific customizations, and robust data migration scenarios. Understanding the AppSource certification process, licensing models (per-user, per-transaction, flat-rate), and post-deployment support requirements is crucial for commercial success.",
+      "theory": "ISV solution architecture in D365 F&O centers around the Application Platform Update (APU) framework and the Modern Development Experience. Your solution must implement the ISysAppInfoProvider interface to register with the system and provide licensing metadata. The SysAppLifecycleProvider pattern handles installation, upgrade, and uninstallation events. Configuration should leverage the SysConfiguration framework with tenant-specific storage in custom configuration tables.\n\nLicensing validation typically uses the SysAppLicenseProvider pattern combined with Azure Key Vault integration for secure license key validation. The solution must implement proper telemetry using Application Insights through the SysTelemetryProvider interface. Error handling should use the Global class for consistent error reporting and the SysInfoAction framework for user guidance. Data entities must follow the DMF patterns with proper staging table implementations and error handling for data migration scenarios. The packaging process requires creating deployable packages with proper metadata, dependency declarations, and installation scripts that handle both fresh installations and upgrades gracefully.",
+      "code_examples": [
+        {
+          "title": "ISV Application Registration and Licensing",
+          "description": "Demonstrates proper ISV app registration with licensing validation and telemetry integration",
+          "language": "xpp",
+          "code": "/// <summary>\n/// ISV Application provider for licensing and registration\n/// </summary>\npublic final class ContosoISVAppProvider implements ISysAppInfoProvider, ISysAppLicenseProvider\n{\n    private const str AppId = 'CONTOSO_WAREHOUSE_EXT';\n    private const str AppVersion = '1.2.0';\n    private const str LicenseKeyVault = 'ContosoWHLicenseVault';\n    \n    public SysAppInfo getAppInfo()\n    {\n        SysAppInfo appInfo = new SysAppInfo();\n        appInfo.AppId = AppId;\n        appInfo.AppName = \"Contoso Warehouse Extensions\";\n        appInfo.AppVersion = AppVersion;\n        appInfo.AppPublisher = \"Contoso Solutions Ltd\";\n        appInfo.AppDescription = \"Advanced warehouse management extensions\";\n        return appInfo;\n    }\n    \n    public boolean validateLicense(str _tenantId)\n    {\n        boolean isValid = false;\n        ContosoWHLicense licenseTmp;\n        \n        try\n        {\n            ttsbegin;\n            \n            select firstonly licenseTmp\n                where licenseTmp.TenantId == _tenantId\n                   && licenseTmp.AppId == AppId\n                   && licenseTmp.ExpiryDate >= DateTimeUtil::getSystemDateTime()\n                   && licenseTmp.LicenseStatus == ContosoLicenseStatus::Active;\n                   \n            if (licenseTmp.RecId)\n            {\n                // Validate against Azure Key Vault\n                str licenseKey = this.retrieveLicenseKey(_tenantId);\n                if (this.validateLicenseSignature(licenseTmp.LicenseHash, licenseKey))\n                {\n                    isValid = true;\n                    this.logTelemetryEvent('LicenseValidated', _tenantId);\n                }\n            }\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            error(\"License validation failed for tenant: \" + _tenantId);\n            this.logTelemetryEvent('LicenseValidationFailed', _tenantId);\n        }\n        \n        return isValid;\n    }\n    \n    private str retrieveLicenseKey(str _tenantId)\n    {\n        // Integration with Azure Key Vault for secure license retrieval\n        ContosoAzureKeyVaultProvider keyVaultProvider = new ContosoAzureKeyVaultProvider();\n        return keyVaultProvider.getSecret(LicenseKeyVault, _tenantId);\n    }\n    \n    private void logTelemetryEvent(str _eventName, str _tenantId)\n    {\n        SysTelemetryProvider telemetryProvider = SysTelemetryProvider::construct();\n        Map eventData = new Map(Types::String, Types::String);\n        eventData.insert('AppId', AppId);\n        eventData.insert('TenantId', _tenantId);\n        eventData.insert('Version', AppVersion);\n        \n        telemetryProvider.logEvent(_eventName, eventData);\n    }\n}"
+        },
+        {
+          "title": "Configuration Management for ISV Solutions",
+          "description": "Tenant-specific configuration framework with upgrade-safe parameter management",
+          "language": "xpp",
+          "code": "/// <summary>\n/// ISV Configuration Manager for tenant-specific settings\n/// </summary>\npublic final class ContosoWHConfigurationManager\n{\n    private ContosoWHParameters parameters;\n    private str tenantId;\n    \n    protected void new(str _tenantId = '')\n    {\n        tenantId = _tenantId ? _tenantId : this.getCurrentTenantId();\n        this.loadParameters();\n    }\n    \n    public static ContosoWHConfigurationManager construct(str _tenantId = '')\n    {\n        return new ContosoWHConfigurationManager(_tenantId);\n    }\n    \n    public boolean isFeatureEnabled(ContosoWHFeature _feature)\n    {\n        ContosoWHFeatureConfig featureConfig;\n        boolean isEnabled = false;\n        \n        try\n        {\n            select firstonly featureConfig\n                where featureConfig.TenantId == tenantId\n                   && featureConfig.FeatureId == _feature\n                   && featureConfig.IsEnabled == NoYes::Yes;\n                   \n            isEnabled = featureConfig.RecId != 0;\n            \n            // Log feature usage for analytics\n            this.logFeatureUsage(_feature, isEnabled);\n        }\n        catch (Exception::Error)\n        {\n            warning(strFmt(\"Failed to check feature status: %1\", _feature));\n        }\n        \n        return isEnabled;\n    }\n    \n    public void updateConfiguration(Map _configUpdates)\n    {\n        ContosoWHFeatureConfig featureConfig;\n        MapEnumerator enumerator = _configUpdates.getEnumerator();\n        \n        try\n        {\n            ttsbegin;\n            \n            while (enumerator.moveNext())\n            {\n                ContosoWHFeature feature = enumerator.currentKey();\n                boolean enabled = enumerator.currentValue();\n                \n                select forupdate featureConfig\n                    where featureConfig.TenantId == tenantId\n                       && featureConfig.FeatureId == feature;\n                       \n                if (!featureConfig.RecId)\n                {\n                    featureConfig.clear();\n                    featureConfig.TenantId = tenantId;\n                    featureConfig.FeatureId = feature;\n                }\n                \n                featureConfig.IsEnabled = enabled ? NoYes::Yes : NoYes::No;\n                featureConfig.LastModifiedBy = curUserId();\n                featureConfig.LastModifiedDateTime = DateTimeUtil::getSystemDateTime();\n                featureConfig.write();\n            }\n            \n            ttscommit;\n            info(\"Configuration updated successfully\");\n        }\n        catch (Exception::Error)\n        {\n            error(\"Failed to update configuration\");\n            throw Exception::Error;\n        }\n    }\n    \n    private void loadParameters()\n    {\n        select firstonly parameters\n            where parameters.TenantId == tenantId;\n            \n        if (!parameters.RecId)\n        {\n            this.createDefaultParameters();\n        }\n    }\n    \n    private void createDefaultParameters()\n    {\n        try\n        {\n            ttsbegin;\n            \n            parameters.clear();\n            parameters.TenantId = tenantId;\n            parameters.DefaultWarehouse = '24';\n            parameters.EnableAdvancedPicking = NoYes::Yes;\n            parameters.AutoCreateWork = NoYes::No;\n            parameters.CreatedDateTime = DateTimeUtil::getSystemDateTime();\n            parameters.write();\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            error(\"Failed to create default parameters\");\n            throw Exception::Error;\n        }\n    }\n    \n    private str getCurrentTenantId()\n    {\n        return SysAppLifecycle::getTenantId();\n    }\n    \n    private void logFeatureUsage(ContosoWHFeature _feature, boolean _enabled)\n    {\n        Map telemetryData = new Map(Types::String, Types::String);\n        telemetryData.insert('Feature', enum2Str(_feature));\n        telemetryData.insert('Enabled', _enabled ? 'true' : 'false');\n        telemetryData.insert('TenantId', tenantId);\n        \n        SysTelemetryProvider::construct().logEvent('FeatureCheck', telemetryData);\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "ISV solutions must never use overlayering — rely exclusively on extensions, CoC, and event handlers to maintain upgrade compatibility",
+        "Implement proper licensing validation with Azure Key Vault integration and tenant-specific license storage for secure multi-tenant operations",
+        "Use SysTelemetryProvider for comprehensive usage analytics and error tracking to support customers and improve your solution",
+        "Design configuration management with tenant isolation using proper data entity patterns and upgrade-safe parameter storage",
+        "Follow AppSource certification requirements including proper error handling, no direct table modifications, and comprehensive unit test coverage"
+      ],
+      "gotchas": [
+        "Never hardcode tenant-specific values or assume single-tenant deployment — ISV solutions must support true multi-tenancy with proper data isolation",
+        "Avoid using kernel classes or X++ compile-time constants that may change between D365 versions — use metadata APIs and runtime discovery instead",
+        "Don't implement custom user interface elements that bypass D365 security framework — all UI must respect role-based access controls and field-level security"
+      ],
+      "performance_tips": [
+        "Cache configuration data using SysGlobalCache with proper invalidation strategies to minimize database calls during license validation",
+        "Implement bulk data operations using set-based queries and proper temp table patterns to handle large-scale tenant migrations efficiently"
+      ],
+      "related_topics": [
+        "xpp_coc",
+        "xpp_security",
+        "xpp_batch"
+      ],
+      "quiz": [
+        {
+          "q": "What is the primary interface that ISV solutions must implement for proper system registration?",
+          "options": [
+            "ISysAppProvider",
+            "ISysAppInfoProvider",
+            "ISysApplicationProvider",
+            "ISysModuleProvider"
+          ],
+          "answer": 1,
+          "explanation": "ISysAppInfoProvider is the correct interface that provides app metadata including ID, version, publisher, and description information required for AppSource solutions."
+        },
+        {
+          "q": "Which licensing validation approach is most secure for multi-tenant ISV solutions?",
+          "options": [
+            "Store license keys in application configuration",
+            "Embed license validation in X++ code",
+            "Use Azure Key Vault with tenant-specific secrets",
+            "Validate licenses using web service calls only"
+          ],
+          "answer": 2,
+          "explanation": "Azure Key Vault with tenant-specific secrets provides the most secure approach, keeping sensitive license data encrypted and isolated per tenant while maintaining proper access controls."
+        },
+        {
+          "q": "What is the most critical architectural principle for AppSource certification?",
+          "options": [
+            "Use only standard D365 tables",
+            "Implement comprehensive logging",
+            "Never use overlayering - only extensions",
+            "Minimize custom code footprint"
+          ],
+          "answer": 2,
+          "explanation": "Never using overlayering is the most critical principle - AppSource solutions must use only extensions, Chain of Command, and event handlers to ensure upgrade compatibility and certification approval."
+        }
+      ]
+    },
+    "generated_date": "2026-04-25",
+    "auto_generated": true
   }
 ]

@@ -1,5 +1,5 @@
 {
-  "last_index": 46,
+  "last_index": 47,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -59,9 +59,10 @@
     "perf_query_optimize",
     "perf_set_based",
     "perf_caching",
-    "perf_async_batch"
+    "perf_async_batch",
+    "arch_isv_design"
   ],
-  "last_run": "2026-04-24",
-  "last_title": "Async Processing & Task Parallelism",
+  "last_run": "2026-04-25",
+  "last_title": "ISV Solution Design & AppSource",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

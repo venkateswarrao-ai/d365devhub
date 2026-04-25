@@ -1,5 +1,13 @@
 [
   {
+    "date": "Apr 25",
+    "tag": "LESSON",
+    "title": "ISV Solution Design & AppSource",
+    "section": "Architecture",
+    "level": "Expert",
+    "id": "arch_isv_design"
+  },
+  {
     "date": "Apr 24",
     "tag": "LESSON",
     "title": "Async Processing & Task Parallelism",
@@ -230,13 +238,5 @@
     "section": "Extensions",
     "level": "Intermediate",
     "id": "ext_menu_items"
-  },
-  {
-    "date": "Mar 26",
-    "tag": "LESSON",
-    "title": "Form DataSource Extensions & Override",
-    "section": "Extensions",
-    "level": "Intermediate",
-    "id": "ext_form_datasource"
   }
 ]

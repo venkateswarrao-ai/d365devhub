@@ -1,1 +1,1 @@
-ISV Solution Design & AppSource
+Azure DevOps ALM for D365 F&O

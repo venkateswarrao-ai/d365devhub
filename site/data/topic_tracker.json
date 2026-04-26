@@ -1,5 +1,5 @@
 {
-  "last_index": 47,
+  "last_index": 48,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -60,9 +60,10 @@
     "perf_set_based",
     "perf_caching",
     "perf_async_batch",
-    "arch_isv_design"
+    "arch_isv_design",
+    "arch_alm_pipeline"
   ],
-  "last_run": "2026-04-25",
-  "last_title": "ISV Solution Design & AppSource",
+  "last_run": "2026-04-26",
+  "last_title": "Azure DevOps ALM for D365 F&O",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

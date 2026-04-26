@@ -1,5 +1,13 @@
 [
   {
+    "date": "Apr 26",
+    "tag": "LESSON",
+    "title": "Azure DevOps ALM for D365 F&O",
+    "section": "Architecture",
+    "level": "Expert",
+    "id": "arch_alm_pipeline"
+  },
+  {
     "date": "Apr 25",
     "tag": "LESSON",
     "title": "ISV Solution Design & AppSource",
@@ -230,13 +238,5 @@
     "section": "Extensions",
     "level": "Beginner",
     "id": "ext_enum_extension"
-  },
-  {
-    "date": "Mar 27",
-    "tag": "LESSON",
-    "title": "Menu Items, Menus & Action Pane Extensions",
-    "section": "Extensions",
-    "level": "Intermediate",
-    "id": "ext_menu_items"
   }
 ]

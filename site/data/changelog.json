@@ -1,5 +1,13 @@
 [
   {
+    "date": "Apr 28",
+    "tag": "LESSON",
+    "title": "LCS: Lifecycle Services Deep Dive",
+    "section": "Architecture",
+    "level": "Expert",
+    "id": "arch_lcs_lifecycle"
+  },
+  {
     "date": "Apr 27",
     "tag": "LESSON",
     "title": "Multi-Environment Strategy (DEV/UAT/PROD)",
@@ -230,13 +238,5 @@
     "section": "Extensions",
     "level": "Expert",
     "id": "ext_ssrs_extension"
-  },
-  {
-    "date": "Mar 29",
-    "tag": "LESSON",
-    "title": "Query Extensions & Data Range Filters",
-    "section": "Extensions",
-    "level": "Intermediate",
-    "id": "ext_query_extension"
   }
 ]

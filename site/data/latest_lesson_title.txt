@@ -1,1 +1,1 @@
-Multi-Environment Strategy (DEV/UAT/PROD)
+LCS: Lifecycle Services Deep Dive

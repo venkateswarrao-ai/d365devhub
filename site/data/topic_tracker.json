@@ -1,5 +1,5 @@
 {
-  "last_index": 49,
+  "last_index": 50,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -62,9 +62,10 @@
     "perf_async_batch",
     "arch_isv_design",
     "arch_alm_pipeline",
-    "arch_multi_env"
+    "arch_multi_env",
+    "arch_lcs_lifecycle"
   ],
-  "last_run": "2026-04-27",
-  "last_title": "Multi-Environment Strategy (DEV/UAT/PROD)",
+  "last_run": "2026-04-28",
+  "last_title": "LCS: Lifecycle Services Deep Dive",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

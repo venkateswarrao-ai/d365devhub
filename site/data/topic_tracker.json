@@ -1,5 +1,5 @@
 {
-  "last_index": 50,
+  "last_index": 51,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -63,9 +63,10 @@
     "arch_isv_design",
     "arch_alm_pipeline",
     "arch_multi_env",
-    "arch_lcs_lifecycle"
+    "arch_lcs_lifecycle",
+    "ai_langchain_d365"
   ],
-  "last_run": "2026-04-28",
-  "last_title": "LCS: Lifecycle Services Deep Dive",
+  "last_run": "2026-04-29",
+  "last_title": "LangChain Agents with D365 OData",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

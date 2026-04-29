@@ -1,1 +1,1 @@
-LCS: Lifecycle Services Deep Dive
+LangChain Agents with D365 OData

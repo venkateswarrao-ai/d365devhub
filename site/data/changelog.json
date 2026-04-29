@@ -1,5 +1,13 @@
 [
   {
+    "date": "Apr 29",
+    "tag": "LESSON",
+    "title": "LangChain Agents with D365 OData",
+    "section": "Agentic AI",
+    "level": "Expert",
+    "id": "ai_langchain_d365"
+  },
+  {
     "date": "Apr 28",
     "tag": "LESSON",
     "title": "LCS: Lifecycle Services Deep Dive",
@@ -230,13 +238,5 @@
     "section": "Extensions",
     "level": "Intermediate",
     "id": "ext_lookup_override"
-  },
-  {
-    "date": "Mar 30",
-    "tag": "LESSON",
-    "title": "SSRS Report Extensions & DP Override",
-    "section": "Extensions",
-    "level": "Expert",
-    "id": "ext_ssrs_extension"
   }
 ]

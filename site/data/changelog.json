@@ -1,5 +1,13 @@
 [
   {
+    "date": "May 08",
+    "tag": "LESSON",
+    "title": "Database Logging & Audit Trail",
+    "section": "Security",
+    "level": "Intermediate",
+    "id": "sec_audit_trail"
+  },
+  {
     "date": "May 07",
     "tag": "LESSON",
     "title": "XDS Policies & Row-Level Security",
@@ -230,13 +238,5 @@
     "section": "Finance",
     "level": "Expert",
     "id": "fin_subledger"
-  },
-  {
-    "date": "Apr 07",
-    "tag": "LESSON",
-    "title": "Voucher Framework & Ledger Posting",
-    "section": "Finance",
-    "level": "Expert",
-    "id": "fin_voucher_framework"
   }
 ]

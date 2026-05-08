@@ -1,5 +1,5 @@
 {
-  "last_index": 58,
+  "last_index": 59,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -71,9 +71,10 @@
     "ai_prompt_engineering",
     "ai_teams_bot_d365",
     "sec_roles_duties",
-    "sec_xds_policies"
+    "sec_xds_policies",
+    "sec_audit_trail"
   ],
-  "last_run": "2026-05-07",
-  "last_title": "XDS Policies & Row-Level Security",
+  "last_run": "2026-05-08",
+  "last_title": "Database Logging & Audit Trail",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

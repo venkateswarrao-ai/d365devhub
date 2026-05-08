@@ -5751,5 +5751,102 @@
     },
     "generated_date": "2026-05-07",
     "auto_generated": true
+  },
+  {
+    "id": "sec_audit_trail",
+    "title": "Database Logging & Audit Trail",
+    "section": "Security",
+    "level": "Intermediate",
+    "duration": "25 min read",
+    "tags": [
+      "security",
+      "logging",
+      "audit",
+      "database",
+      "compliance"
+    ],
+    "summary": "Master D365 F&O database logging framework to implement comprehensive audit trails for regulatory compliance and security monitoring.",
+    "content": {
+      "overview": "Database logging in D365 F&O provides automatic tracking of data modifications across tables, capturing who changed what, when, and from where. This framework is essential for regulatory compliance (SOX, GDPR, FDA), forensic analysis, and change management. Unlike manual logging approaches, D365's built-in database logging operates at the kernel level, ensuring all changes are captured regardless of how data is modified—through forms, batch jobs, or direct X++ operations.\n\nThe logging framework leverages the SysDatabaseLog table as the central repository, with supporting tables like DatabaseLogSetup and DatabaseLogType defining what gets logged. Understanding this system is crucial for implementing comprehensive audit trails without impacting system performance. The framework integrates with D365's security model, allowing role-based access to audit data while maintaining data integrity through immutable log entries.",
+      "theory": "D365's database logging architecture operates through the DatabaseLog framework, implemented primarily in the SysDatabaseLog class hierarchy. When enabled for a table, the kernel automatically intercepts DML operations (insert, update, delete) and creates corresponding log entries in SysDatabaseLog. The logging occurs at the database tier, making it impossible to bypass through code modifications.\n\nThe framework uses a publisher-subscriber pattern where tables are 'publishers' and the logging system subscribes to their change events. Configuration is managed through DatabaseLogSetup (defines which tables/fields to log) and DatabaseLogType (defines log entry types). The SysDatabaseLogDetail table stores field-level changes with before/after values. Performance impact is minimized through asynchronous batch processing for non-critical logs and immediate logging only for high-priority audit events.\n\nKey classes include SysDatabaseLog (main logging engine), DatabaseLogSetup (configuration management), and SysDatabaseLogProcessing (batch cleanup). The system integrates with D365's change tracking via the validateWrite/validateDelete table methods, ensuring audit entries are created within the same transaction as the business data changes.",
+      "code_examples": [
+        {
+          "title": "Enable Database Logging for Customer Table",
+          "description": "Programmatically configure database logging for CustTable with specific field tracking",
+          "language": "xpp",
+          "code": "public static void enableCustomerTableLogging()\n{\n    DatabaseLogSetup databaseLogSetup;\n    DatabaseLogType databaseLogType;\n    \n    ttsbegin;\n    try\n    {\n        // Create or update database log setup for CustTable\n        select firstonly forUpdate databaseLogSetup\n            where databaseLogSetup.logTable == tableNum(CustTable);\n        \n        if (!databaseLogSetup)\n        {\n            databaseLogSetup.clear();\n            databaseLogSetup.logTable = tableNum(CustTable);\n            databaseLogSetup.logField = 0; // Log all fields\n            databaseLogSetup.logType = DatabaseLogType::Update | DatabaseLogType::Delete;\n            databaseLogSetup.primaryKey = NoYes::Yes;\n            databaseLogSetup.name = tableId2name(tableNum(CustTable));\n            databaseLogSetup.insert();\n            \n            info(strFmt(\"Database logging enabled for %1\", databaseLogSetup.name));\n        }\n        \n        // Enable specific field logging for sensitive data\n        databaseLogSetup.clear();\n        databaseLogSetup.logTable = tableNum(CustTable);\n        databaseLogSetup.logField = fieldNum(CustTable, CreditMax);\n        databaseLogSetup.logType = DatabaseLogType::Update;\n        databaseLogSetup.primaryKey = NoYes::No;\n        databaseLogSetup.name = fieldId2name(tableNum(CustTable), fieldNum(CustTable, CreditMax));\n        \n        if (!databaseLogSetup.validateWrite())\n        {\n            throw error(\"Failed to validate database log setup\");\n        }\n        \n        databaseLogSetup.insert();\n        \n        // Refresh the logging setup cache\n        SysDatabaseLog::refresh();\n        \n        ttscommit;\n        info(\"Customer table database logging configuration completed\");\n    }\n    catch (Exception::Error)\n    {\n        ttsabort;\n        error(\"Failed to enable database logging for CustTable\");\n    }\n}"
+        },
+        {
+          "title": "Query Audit Trail with Custom Filter",
+          "description": "Create a robust audit trail query with user, date, and operation type filtering",
+          "language": "xpp",
+          "code": "public class AuditTrailInquiry extends RunBase\n{\n    DialogField dialogFieldFromDate;\n    DialogField dialogFieldToDate;\n    DialogField dialogFieldUserId;\n    DialogField dialogFieldTableId;\n    \n    FromDate fromDate;\n    ToDate toDate;\n    UserId userId;\n    TableId auditTableId;\n    \n    public void generateAuditReport()\n    {\n        SysDatabaseLog sysDatabaseLog;\n        SysDatabaseLogDetail sysDatabaseLogDetail;\n        Query query;\n        QueryBuildDataSource qbds;\n        QueryRun queryRun;\n        \n        try\n        {\n            query = new Query();\n            qbds = query.addDataSource(tableNum(SysDatabaseLog));\n            qbds.addSelectionField(fieldNum(SysDatabaseLog, createdDateTime));\n            qbds.addSelectionField(fieldNum(SysDatabaseLog, createdBy));\n            qbds.addSelectionField(fieldNum(SysDatabaseLog, company));\n            qbds.addSelectionField(fieldNum(SysDatabaseLog, table));\n            qbds.addSelectionField(fieldNum(SysDatabaseLog, logType));\n            \n            // Add date range filter\n            if (fromDate && toDate)\n            {\n                qbds.addRange(fieldNum(SysDatabaseLog, createdDateTime))\n                    .value(queryRange(DateTimeUtil::newDateTime(fromDate, 0), \n                                     DateTimeUtil::newDateTime(toDate, 86399)));\n            }\n            \n            // Add user filter\n            if (userId)\n            {\n                qbds.addRange(fieldNum(SysDatabaseLog, createdBy)).value(userId);\n            }\n            \n            // Add table filter\n            if (auditTableId)\n            {\n                qbds.addRange(fieldNum(SysDatabaseLog, table)).value(int2Str(auditTableId));\n            }\n            \n            // Join with detail table for field-level changes\n            QueryBuildDataSource qbdsDetail = qbds.addDataSource(tableNum(SysDatabaseLogDetail));\n            qbdsDetail.joinMode(JoinMode::ExistsJoin);\n            qbdsDetail.relations(true);\n            \n            queryRun = new QueryRun(query);\n            \n            info(\"=== Audit Trail Report ===\");\n            \n            while (queryRun.next())\n            {\n                sysDatabaseLog = queryRun.get(tableNum(SysDatabaseLog));\n                \n                info(strFmt(\"Date: %1 | User: %2 | Table: %3 | Action: %4 | Company: %5\",\n                    DateTimeUtil::toStr(sysDatabaseLog.createdDateTime),\n                    sysDatabaseLog.createdBy,\n                    tableId2name(sysDatabaseLog.table),\n                    enum2Str(sysDatabaseLog.logType),\n                    sysDatabaseLog.company));\n                \n                // Get detailed field changes\n                this.printFieldChanges(sysDatabaseLog.RecId);\n            }\n        }\n        catch (Exception::Error)\n        {\n            error(\"Error generating audit trail report\");\n        }\n    }\n    \n    private void printFieldChanges(RecId _logRecId)\n    {\n        SysDatabaseLogDetail logDetail;\n        \n        while select logDetail\n            where logDetail.databaseLog == _logRecId\n        {\n            info(strFmt(\"  Field: %1 | Old: %2 | New: %3\",\n                fieldId2name(logDetail.table, logDetail.field),\n                logDetail.oldValue ? logDetail.oldValue : \"<empty>\",\n                logDetail.newValue ? logDetail.newValue : \"<empty>\"));\n        }\n    }\n}"
+        },
+        {
+          "title": "Custom Audit Event Handler",
+          "description": "Implement a CoC extension to add custom logic when audit-sensitive tables are modified",
+          "language": "xpp",
+          "code": "[ExtensionOf(tableStr(CustTable))]\nfinal class CustTableAuditExtension\n{\n    public void update()\n    {\n        CustTable originalRecord = this.orig();\n        boolean creditMaxChanged = false;\n        boolean custGroupChanged = false;\n        \n        // Capture significant business changes before update\n        if (originalRecord.CreditMax != this.CreditMax)\n        {\n            creditMaxChanged = true;\n        }\n        \n        if (originalRecord.CustGroup != this.CustGroup)\n        {\n            custGroupChanged = true;\n        }\n        \n        // Call original update method\n        next update();\n        \n        // Post-update audit logging for business-critical changes\n        if (creditMaxChanged || custGroupChanged)\n        {\n            this.logCriticalCustomerChange(originalRecord, creditMaxChanged, custGroupChanged);\n        }\n    }\n    \n    private void logCriticalCustomerChange(CustTable _original, boolean _creditMaxChanged, boolean _custGroupChanged)\n    {\n        SysEventLog eventLog;\n        str auditMessage;\n        \n        ttsbegin;\n        try\n        {\n            auditMessage = strFmt(\"Critical customer change - Account: %1\", this.AccountNum);\n            \n            if (_creditMaxChanged)\n            {\n                auditMessage += strFmt(\" | Credit limit changed from %1 to %2\",\n                                     _original.CreditMax, this.CreditMax);\n            }\n            \n            if (_custGroupChanged)\n            {\n                auditMessage += strFmt(\" | Customer group changed from %1 to %2\",\n                                     _original.CustGroup, this.CustGroup);\n            }\n            \n            // Log to system event log for immediate alerting\n            eventLog.clear();\n            eventLog.Module = ModuleAxapta::Ledger;\n            eventLog.Type = SysEventLogType::Warning;\n            eventLog.Function = classStr(CustTableAuditExtension);\n            eventLog.Description = auditMessage;\n            eventLog.Company = curext();\n            eventLog.UserId = curuserid();\n            eventLog.ComputerName = WinAPIServer::getComputerName();\n            eventLog.insert();\n            \n            // Send alert to finance manager if credit limit increased significantly\n            if (_creditMaxChanged && (this.CreditMax - _original.CreditMax) > 10000)\n            {\n                this.sendCreditLimitAlert(_original.CreditMax, this.CreditMax);\n            }\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            warning(\"Failed to log critical customer change audit event\");\n        }\n    }\n    \n    private void sendCreditLimitAlert(AmountMST _oldLimit, AmountMST _newLimit)\n    {\n        SysMailerMessageBuilder messageBuilder;\n        SysMailerFactory mailerFactory;\n        \n        messageBuilder = new SysMailerMessageBuilder();\n        messageBuilder.setSubject(strFmt(\"Credit Limit Alert - Customer %1\", this.AccountNum));\n        messageBuilder.setBody(strFmt(\"Customer %1 (%2) credit limit increased from %3 to %4 by user %5\",\n                                    this.AccountNum, this.name(),\n                                    _oldLimit, _newLimit, curuserid()));\n        \n        // Add finance manager as recipient (configuration should come from parameters)\n        messageBuilder.addTo(\"finance.manager@contoso.com\");\n        \n        mailerFactory = SysMailerFactory::getNonInteractiveMailer();\n        mailerFactory.sendNonInteractive(messageBuilder.getMessage());\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Database logging operates at the kernel level and captures all DML operations regardless of the code path used to modify data",
+        "Use DatabaseLogSetup table to configure which tables and fields should be audited, with selective field logging to minimize performance impact",
+        "SysDatabaseLog stores the main audit entries while SysDatabaseLogDetail contains field-level before/after values for detailed change tracking",
+        "Audit logs are immutable once created — they cannot be modified or deleted through standard operations, ensuring data integrity for compliance",
+        "Implement custom audit handlers using Chain of Command extensions on validateWrite/validateDelete methods for business-specific audit logic"
+      ],
+      "gotchas": [
+        "Never rely solely on application-level logging for compliance — always use kernel-level database logging since it cannot be bypassed by code modifications or direct SQL operations",
+        "Avoid enabling logging on high-volume tables without careful performance testing — logging every field on tables with millions of daily transactions can severely impact system performance",
+        "Don't assume audit logs are automatically purged — implement proper retention policies using DatabaseLogCleanup batch jobs to prevent unbounded growth of audit tables"
+      ],
+      "performance_tips": [
+        "Enable selective field logging rather than full table logging for high-volume tables, focusing only on business-critical or compliance-required fields",
+        "Use DatabaseLogType filters to log only specific operations (Insert/Update/Delete) based on business requirements rather than enabling all operation types"
+      ],
+      "related_topics": [
+        "xpp_security",
+        "xpp_batch",
+        "xpp_coc"
+      ],
+      "quiz": [
+        {
+          "q": "Which table serves as the primary repository for D365 F&O audit trail entries?",
+          "options": [
+            "DatabaseLogSetup",
+            "SysDatabaseLog",
+            "SysDatabaseLogDetail",
+            "SysEventLog"
+          ],
+          "answer": 1,
+          "explanation": "SysDatabaseLog is the main table that stores audit trail entries created by the database logging framework, with each record representing a logged operation (insert, update, or delete)."
+        },
+        {
+          "q": "What is the primary advantage of D365's kernel-level database logging over application-level logging?",
+          "options": [
+            "Better performance",
+            "Cannot be bypassed by code modifications",
+            "Easier to configure",
+            "Supports more data types"
+          ],
+          "answer": 1,
+          "explanation": "Kernel-level database logging operates at the database tier and automatically captures all DML operations regardless of how they're performed, making it impossible to bypass through code modifications or direct database access."
+        },
+        {
+          "q": "In the DatabaseLogSetup configuration, what does setting logField to 0 accomplish?",
+          "options": [
+            "Disables logging for the table",
+            "Logs only the primary key",
+            "Logs all fields in the table",
+            "Creates an error condition"
+          ],
+          "answer": 2,
+          "explanation": "Setting logField to 0 in DatabaseLogSetup configures the system to log all fields in the specified table, while setting it to a specific field number enables logging for only that particular field."
+        }
+      ]
+    },
+    "generated_date": "2026-05-08",
+    "auto_generated": true
   }
 ]

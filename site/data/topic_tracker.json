@@ -1,5 +1,5 @@
 {
-  "last_index": 59,
+  "last_index": 60,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -72,9 +72,10 @@
     "ai_teams_bot_d365",
     "sec_roles_duties",
     "sec_xds_policies",
-    "sec_audit_trail"
+    "sec_audit_trail",
+    "sec_data_encryption"
   ],
-  "last_run": "2026-05-08",
-  "last_title": "Database Logging & Audit Trail",
+  "last_run": "2026-05-09",
+  "last_title": "Sensitive Field Encryption in D365",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

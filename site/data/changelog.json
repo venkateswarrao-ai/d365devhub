@@ -1,5 +1,13 @@
 [
   {
+    "date": "May 09",
+    "tag": "LESSON",
+    "title": "Sensitive Field Encryption in D365",
+    "section": "Security",
+    "level": "Expert",
+    "id": "sec_data_encryption"
+  },
+  {
     "date": "May 08",
     "tag": "LESSON",
     "title": "Database Logging & Audit Trail",
@@ -230,13 +238,5 @@
     "section": "Finance",
     "level": "Expert",
     "id": "fin_tax_engine"
-  },
-  {
-    "date": "Apr 08",
-    "tag": "LESSON",
-    "title": "Subledger Journal & AccountingEngine",
-    "section": "Finance",
-    "level": "Expert",
-    "id": "fin_subledger"
   }
 ]

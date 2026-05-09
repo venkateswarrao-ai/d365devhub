@@ -5848,5 +5848,102 @@
     },
     "generated_date": "2026-05-08",
     "auto_generated": true
+  },
+  {
+    "id": "sec_data_encryption",
+    "title": "Sensitive Field Encryption in D365",
+    "section": "Security",
+    "level": "Expert",
+    "duration": "18 min read",
+    "tags": [
+      "encryption",
+      "security",
+      "sensitive-data",
+      "pii",
+      "compliance"
+    ],
+    "summary": "Master D365 F&O's sensitive field encryption framework for protecting PII and financial data using SysEncryption classes and encryption policies.",
+    "content": {
+      "overview": "D365 Finance & Operations provides a robust framework for encrypting sensitive data at the field level using the SysEncryption subsystem and encryption policies. This capability is crucial for compliance requirements (GDPR, CCPA, PCI DSS) and protecting personally identifiable information (PII) like social security numbers, bank account details, and credit card information. The encryption framework operates transparently at the database layer, automatically encrypting data on write and decrypting on read, while maintaining query performance through careful key management and caching strategies. Unlike simple field-level obfuscation, this system uses industry-standard AES-256 encryption with proper key rotation and access control integration, making it suitable for production environments handling sensitive financial and personal data.",
+      "theory": "The D365 encryption framework is built around the SysEncryption class hierarchy and the EncryptionPolicy table, which defines encryption rules for specific table fields. When a field is marked for encryption via the SensitiveField property in the AOT, the system automatically routes data through SysEncryptionEngine during insert/update operations and SysDecryptionEngine during select operations. The framework uses a hierarchical key management system where the Database Encryption Key (DEK) encrypts field data, while the Key Encryption Key (KEK) protects the DEK. Keys are managed through the SysEncryptionKeyManager class and stored securely in Azure Key Vault when using cloud deployments. The encryption process is transparent to business logic - developers continue using standard table operations while the framework handles encryption/decryption through method interception in the kernel layer. Performance is maintained through intelligent caching in SysEncryptionCache and bulk operations support in SysEncryptionBatch. The system integrates with D365's security framework, respecting field-level security permissions and audit trail requirements through SysEncryptionAudit.",
+      "code_examples": [
+        {
+          "title": "Setting Up Field Encryption Policy",
+          "description": "Demonstrates how to programmatically configure encryption policies for sensitive fields in custom tables",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Sets up encryption policy for sensitive customer data fields\n/// </summary>\nclass CustomerDataEncryptionSetup\n{\n    public static void setupEncryptionPolicies()\n    {\n        EncryptionPolicy encryptionPolicy;\n        SysEncryptionKeyManager keyManager = new SysEncryptionKeyManager();\n        \n        ttsbegin;\n        try\n        {\n            // Create encryption policy for SSN field\n            encryptionPolicy.clear();\n            encryptionPolicy.TableId = tableNum(CustTable);\n            encryptionPolicy.FieldId = fieldNum(CustTable, SocialSecurityNumber);\n            encryptionPolicy.EncryptionType = SysEncryptionType::AES256;\n            encryptionPolicy.KeyId = keyManager.getActiveKeyId('CustomerPII');\n            encryptionPolicy.IsEnabled = NoYes::Yes;\n            encryptionPolicy.CreatedDateTime = DateTimeUtil::utcNow();\n            encryptionPolicy.CreatedBy = curUserId();\n            \n            if (!encryptionPolicy.validateWrite())\n            {\n                throw error(\"@SYS_EncryptionPolicyValidationFailed\");\n            }\n            \n            encryptionPolicy.insert();\n            \n            // Create policy for bank account numbers\n            encryptionPolicy.clear();\n            encryptionPolicy.TableId = tableNum(BankAccount);\n            encryptionPolicy.FieldId = fieldNum(BankAccount, AccountNum);\n            encryptionPolicy.EncryptionType = SysEncryptionType::AES256;\n            encryptionPolicy.KeyId = keyManager.getActiveKeyId('FinancialData');\n            encryptionPolicy.IsEnabled = NoYes::Yes;\n            encryptionPolicy.CreatedDateTime = DateTimeUtil::utcNow();\n            encryptionPolicy.CreatedBy = curUserId();\n            encryptionPolicy.insert();\n            \n            ttscommit;\n            info(strFmt(\"@SYS_EncryptionPoliciesCreated\"));\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            error(\"@SYS_EncryptionPolicySetupFailed\");\n        }\n    }\n}"
+        },
+        {
+          "title": "Custom Encryption Service for Complex Scenarios",
+          "description": "Advanced implementation showing custom encryption service with key rotation and bulk operations support",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Custom encryption service handling complex encryption scenarios\n/// with automatic key rotation and performance optimization\n/// </summary>\nclass CustomSensitiveDataService extends SysEncryptionServiceBase\n{\n    private SysEncryptionEngine encryptionEngine;\n    private SysEncryptionCache encryptionCache;\n    private boolean useCache;\n    \n    public void new()\n    {\n        super();\n        this.encryptionEngine = new SysEncryptionEngine();\n        this.encryptionCache = SysEncryptionCache::getInstance();\n        this.useCache = true;\n    }\n    \n    /// <summary>\n    /// Encrypts sensitive data with automatic key validation\n    /// </summary>\n    public EncryptedFieldData encryptSensitiveData(str _plainText, \n                                                   FieldId _fieldId, \n                                                   TableId _tableId)\n    {\n        EncryptedFieldData encryptedData;\n        SysEncryptionKey currentKey;\n        str keyId;\n        \n        if (!_plainText)\n        {\n            return encryptedData;\n        }\n        \n        try\n        {\n            // Get active encryption key for field\n            keyId = this.getActiveKeyForField(_tableId, _fieldId);\n            \n            if (!keyId)\n            {\n                throw error(strFmt(\"@SYS_NoEncryptionKeyFound\", fieldId2name(_tableId, _fieldId)));\n            }\n            \n            // Check if key needs rotation\n            if (this.isKeyRotationRequired(keyId))\n            {\n                this.rotateEncryptionKey(keyId, _tableId, _fieldId);\n            }\n            \n            // Perform encryption with current key\n            encryptedData = this.encryptionEngine.encrypt(_plainText, keyId);\n            \n            // Cache for performance if enabled\n            if (this.useCache)\n            {\n                this.encryptionCache.cacheEncryptionMetadata(_tableId, _fieldId, keyId);\n            }\n            \n            // Log encryption event for audit\n            this.logEncryptionEvent(_tableId, _fieldId, curUserId(), 'Encrypt');\n            \n            return encryptedData;\n        }\n        catch (Exception::Error)\n        {\n            error(strFmt(\"@SYS_EncryptionFailed\", fieldId2name(_tableId, _fieldId)));\n            return encryptedData;\n        }\n    }\n    \n    /// <summary>\n    /// Bulk encryption for data migration scenarios\n    /// </summary>\n    public void bulkEncryptTableData(TableId _tableId, FieldId _fieldId, int _batchSize = 1000)\n    {\n        Common sourceTable = new DictTable(_tableId).makeRecord();\n        QueryBuild queryBuild;\n        QueryRun queryRun;\n        int processedRecords = 0;\n        \n        queryBuild = new QueryBuild();\n        queryBuild.dataSourceTable(_tableId);\n        queryRun = new QueryRun(queryBuild);\n        \n        ttsbegin;\n        try\n        {\n            while (queryRun.next())\n            {\n                sourceTable = queryRun.get(_tableId);\n                \n                // Process field encryption\n                this.processRecordEncryption(sourceTable, _fieldId);\n                \n                processedRecords++;\n                \n                // Commit in batches for performance\n                if (processedRecords % _batchSize == 0)\n                {\n                    ttscommit;\n                    ttsbegin;\n                    info(strFmt(\"Processed %1 records\", processedRecords));\n                }\n            }\n            \n            ttscommit;\n            info(strFmt(\"Bulk encryption completed. Total records: %1\", processedRecords));\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            error(\"Bulk encryption failed\");\n        }\n    }\n    \n    private void processRecordEncryption(Common _record, FieldId _fieldId)\n    {\n        DictField dictField = new DictField(_record.TableId, _fieldId);\n        str plainTextValue = dictField.getValue(_record);\n        EncryptedFieldData encryptedData;\n        \n        if (plainTextValue)\n        {\n            encryptedData = this.encryptSensitiveData(plainTextValue, \n                                                      _fieldId, \n                                                      _record.TableId);\n            dictField.setValue(_record, encryptedData.EncryptedValue);\n            _record.update();\n        }\n    }\n    \n    private str getActiveKeyForField(TableId _tableId, FieldId _fieldId)\n    {\n        EncryptionPolicy policy;\n        \n        select firstonly KeyId from policy\n        where policy.TableId == _tableId\n           && policy.FieldId == _fieldId\n           && policy.IsEnabled == NoYes::Yes;\n           \n        return policy.KeyId;\n    }\n}"
+        },
+        {
+          "title": "Decryption and Access Control Integration",
+          "description": "Shows proper decryption with security integration and field-level access control validation",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Secure decryption service with integrated access control\n/// </summary>\nclass SecureDecryptionService\n{\n    private SysDecryptionEngine decryptionEngine;\n    private SecurityRights securityRights;\n    \n    public void new()\n    {\n        this.decryptionEngine = new SysDecryptionEngine();\n        this.securityRights = new SecurityRights();\n    }\n    \n    /// <summary>\n    /// Decrypts field data with security validation\n    /// </summary>\n    public str decryptSensitiveField(Common _record, FieldId _fieldId)\n    {\n        str decryptedValue = '';\n        DictField dictField;\n        EncryptedFieldData encryptedData;\n        \n        try\n        {\n            // Validate user access to sensitive field\n            if (!this.validateFieldAccess(_record.TableId, _fieldId, curUserId()))\n            {\n                throw error(strFmt(\"@SYS_InsufficientPermissions\", \n                                  fieldId2name(_record.TableId, _fieldId)));\n            }\n            \n            dictField = new DictField(_record.TableId, _fieldId);\n            encryptedData = dictField.getValue(_record);\n            \n            if (!encryptedData.EncryptedValue)\n            {\n                return '';\n            }\n            \n            // Perform decryption\n            decryptedValue = this.decryptionEngine.decrypt(encryptedData);\n            \n            // Log access for audit trail\n            this.logFieldAccess(_record.TableId, _fieldId, curUserId(), 'Decrypt');\n            \n            // Apply data masking if required\n            if (this.requiresDataMasking(_record.TableId, _fieldId))\n            {\n                decryptedValue = this.maskSensitiveData(decryptedValue, _fieldId);\n            }\n            \n            return decryptedValue;\n        }\n        catch (Exception::Error)\n        {\n            error(strFmt(\"@SYS_DecryptionFailed\", fieldId2name(_record.TableId, _fieldId)));\n            return '';\n        }\n    }\n    \n    private boolean validateFieldAccess(TableId _tableId, FieldId _fieldId, UserId _userId)\n    {\n        SecurityUserRole userRole;\n        SecurityRole role;\n        SecurityPermission permission;\n        \n        // Check if user has explicit permission for sensitive data\n        select firstonly RecId from userRole\n        join role\n        where userRole.User == _userId\n           && userRole.SecurityRole == role.RecId\n           && role.Name == 'SensitiveDataAccess'\n           \n        join permission\n        where permission.SecurityRole == role.RecId\n           && permission.ObjectType == SecurableType::Table\n           && permission.ObjectName == tableId2name(_tableId)\n           && permission.AccessRight >= AccessRight::Read;\n           \n        return userRole.RecId != 0;\n    }\n    \n    private str maskSensitiveData(str _value, FieldId _fieldId)\n    {\n        // Apply appropriate masking based on field type\n        switch (_fieldId)\n        {\n            case fieldNum(CustTable, SocialSecurityNumber):\n                return this.maskSSN(_value);\n                \n            case fieldNum(BankAccount, AccountNum):\n                return this.maskBankAccount(_value);\n                \n            default:\n                return this.maskGeneric(_value);\n        }\n    }\n    \n    private str maskSSN(str _ssn)\n    {\n        if (strlen(_ssn) >= 4)\n        {\n            return 'XXX-XX-' + substr(_ssn, strlen(_ssn) - 3, 4);\n        }\n        return 'XXX-XX-XXXX';\n    }\n    \n    private void logFieldAccess(TableId _tableId, FieldId _fieldId, UserId _userId, str _operation)\n    {\n        SysEncryptionAudit auditLog;\n        \n        auditLog.clear();\n        auditLog.TableId = _tableId;\n        auditLog.FieldId = _fieldId;\n        auditLog.UserId = _userId;\n        auditLog.Operation = _operation;\n        auditLog.AccessDateTime = DateTimeUtil::utcNow();\n        auditLog.SessionId = sessionId();\n        auditLog.insert();\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Use the SensitiveField AOT property to enable automatic encryption — this triggers kernel-level interception without requiring code changes in business logic",
+        "Implement proper key management through SysEncryptionKeyManager — rotate keys regularly and store them securely in Azure Key Vault for cloud deployments",
+        "Integrate encryption with D365 security framework — validate user permissions before decrypting sensitive fields using SecurityRights class validation",
+        "Design for performance with SysEncryptionCache — cache encryption metadata and use bulk operations for data migration scenarios to avoid N+1 encryption calls",
+        "Maintain audit compliance through SysEncryptionAudit — log all encryption/decryption operations with user context and timestamps for regulatory requirements"
+      ],
+      "gotchas": [
+        "Never store encryption keys in the same database as encrypted data — this defeats the purpose of encryption and violates security best practices; use Azure Key Vault or external HSMs",
+        "Don't ignore EncryptionPolicy validation failures — the validateWrite() method checks key availability and field compatibility; bypassing it can cause runtime decryption errors",
+        "Avoid encrypting frequently queried fields without proper indexing strategy — encrypted fields cannot use standard database indexes; consider using computed hash columns for search operations"
+      ],
+      "performance_tips": [
+        "Implement encryption caching through SysEncryptionCache to avoid repeated key lookups — cache encryption metadata at the session level but never cache decrypted values",
+        "Use bulk encryption operations for data migration — process records in batches with proper transaction scope to maintain performance and memory usage within acceptable limits"
+      ],
+      "related_topics": [
+        "xpp_security",
+        "data_compliance",
+        "azure_integration"
+      ],
+      "quiz": [
+        {
+          "q": "Which class is responsible for managing encryption keys in D365 F&O's encryption framework?",
+          "options": [
+            "SysEncryptionEngine",
+            "SysEncryptionKeyManager",
+            "EncryptionPolicy",
+            "SysEncryptionCache"
+          ],
+          "answer": 1,
+          "explanation": "SysEncryptionKeyManager is the correct answer. This class handles key lifecycle management including key generation, rotation, and secure storage integration with Azure Key Vault."
+        },
+        {
+          "q": "What happens when you set the SensitiveField property to Yes on a table field in the AOT?",
+          "options": [
+            "Field data is immediately encrypted in the database",
+            "D365 kernel automatically routes field operations through encryption framework",
+            "The field becomes read-only for all users",
+            "Field validation rules are automatically applied"
+          ],
+          "answer": 1,
+          "explanation": "Setting SensitiveField to Yes enables automatic kernel-level interception of field operations, routing them through the encryption/decryption framework transparently to business logic."
+        },
+        {
+          "q": "Why should encryption keys never be stored in the same database as encrypted data?",
+          "options": [
+            "It causes performance issues with queries",
+            "It violates the principle of separation of concerns in encryption security",
+            "The system will automatically reject such configurations",
+            "It makes key rotation impossible"
+          ],
+          "answer": 1,
+          "explanation": "Storing keys with encrypted data violates fundamental encryption security principles - if someone gains access to the database, they have both the encrypted data and the means to decrypt it, making the encryption pointless."
+        }
+      ]
+    },
+    "generated_date": "2026-05-09",
+    "auto_generated": true
   }
 ]

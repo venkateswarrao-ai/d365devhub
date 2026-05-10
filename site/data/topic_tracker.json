@@ -1,5 +1,5 @@
 {
-  "last_index": 60,
+  "last_index": 61,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -73,9 +73,10 @@
     "sec_roles_duties",
     "sec_xds_policies",
     "sec_audit_trail",
-    "sec_data_encryption"
+    "sec_data_encryption",
+    "rep_er_framework"
   ],
-  "last_run": "2026-05-09",
-  "last_title": "Sensitive Field Encryption in D365",
+  "last_run": "2026-05-10",
+  "last_title": "Electronic Reporting (ER) Framework",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

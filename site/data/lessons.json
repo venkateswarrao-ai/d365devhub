@@ -5945,5 +5945,96 @@
     },
     "generated_date": "2026-05-09",
     "auto_generated": true
+  },
+  {
+    "id": "rep_er_framework",
+    "title": "Electronic Reporting (ER) Framework",
+    "section": "Reporting",
+    "level": "Expert",
+    "duration": "25 min read",
+    "tags": [
+      "electronic-reporting",
+      "er-framework",
+      "reporting",
+      "data-export",
+      "configuration"
+    ],
+    "summary": "Master the Electronic Reporting framework for creating configurable, code-free business documents and data exports with advanced X++ integration techniques.",
+    "content": {
+      "overview": "The Electronic Reporting (ER) framework is D365 F&O's configuration-driven reporting engine that enables business users to create and modify electronic documents without code changes. Unlike traditional SSRS reports or X++ classes, ER uses metadata-driven configurations to generate invoices, payments, regulatory reports, and data exports. The framework separates data model definition from format configuration, enabling the same data source to power multiple output formats (XML, Excel, PDF, text files).\n\nER becomes critical in multinational implementations where document formats vary by country, or when frequent regulatory changes require rapid report modifications without developer intervention. The framework integrates deeply with the D365 data model through ERDataModelMappingRuntimeContext and provides extensive X++ extensibility points for complex business logic that configuration alone cannot handle.",
+      "theory": "The ER framework operates on a four-layer architecture: Data Model (abstract business entities), Model Mapping (connects data model to D365 tables), Format (defines output structure), and Format Mapping (binds data to format elements). The ERIModelMappingDataSource interface provides the core abstraction for data retrieval, while ERFormatMappingRunBaseContract handles runtime execution context. Key classes include ERModelMappingDataSourceView for custom data sources, ERFormatMappingRun for format execution, and ERModelMappingTable for configuration storage. The framework leverages the SysPlugin pattern extensively - ERDataProviderContainer manages data provider registration, and ERDocuManagement handles document generation lifecycle. Runtime execution flows through ERFormatMappingRun.run(), which instantiates ERModelMappingRunBase descendants to execute configured mappings. Custom X++ logic integrates via ERExpressionDesignerFormula expressions that can invoke static methods, enabling complex calculations and business rule evaluation within the configuration layer.",
+      "code_examples": [
+        {
+          "title": "Custom ER Data Provider Implementation",
+          "description": "Creating a custom data provider for complex business logic that cannot be handled through standard ER model mapping configurations",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Custom ER data provider for advanced customer analytics\n/// </summary>\nclass ERCustomerAnalyticsDataProvider extends ERIModelMappingDataSourceView\n{\n    private CustTable custTable;\n    private TransDate fromDate;\n    private TransDate toDate;\n    \n    protected void new()\n    {\n        super();\n    }\n    \n    /// <summary>\n    /// Factory method for data provider instantiation\n    /// </summary>\n    public static ERCustomerAnalyticsDataProvider construct()\n    {\n        return new ERCustomerAnalyticsDataProvider();\n    }\n    \n    /// <summary>\n    /// Initialize provider with runtime parameters\n    /// </summary>\n    public void init(ERModelMappingRuntimeContext _runtimeContext)\n    {\n        super(_runtimeContext);\n        \n        // Extract parameters from ER runtime context\n        ERDataContainerParameterized paramContainer = _runtimeContext.getParameters();\n        if (paramContainer)\n        {\n            this.fromDate = paramContainer.getValueByName('FromDate');\n            this.toDate = paramContainer.getValueByName('ToDate');\n        }\n    }\n    \n    /// <summary>\n    /// Main data retrieval method called by ER runtime\n    /// </summary>\n    public Common getFirstRecord()\n    {\n        QueryRun queryRun;\n        Query query = new Query();\n        QueryBuildDataSource qbds;\n        \n        try\n        {\n            // Build dynamic query for customer analytics\n            qbds = query.dataSourceTable(tableNum(CustTable));\n            qbds.addRange(fieldNum(CustTable, Blocked)).value(CustVendorBlocked::No);\n            \n            if (this.fromDate && this.toDate)\n            {\n                QueryBuildDataSource qbdsTrans = qbds.addDataSource(tableNum(CustTrans));\n                qbdsTrans.joinMode(JoinMode::InnerJoin);\n                qbdsTrans.addLink(fieldNum(CustTable, AccountNum), fieldNum(CustTrans, AccountNum));\n                qbdsTrans.addRange(fieldNum(CustTrans, TransDate)).value(\n                    queryRange(this.fromDate, this.toDate));\n            }\n            \n            queryRun = new QueryRun(query);\n            \n            if (queryRun.next())\n            {\n                this.custTable = queryRun.get(tableNum(CustTable));\n                return this.custTable;\n            }\n        }\n        catch (Exception::Error)\n        {\n            error(\"Error in ERCustomerAnalyticsDataProvider::getFirstRecord()\");\n        }\n        \n        return null;\n    }\n    \n    /// <summary>\n    /// Navigate to next record in result set\n    /// </summary>\n    public Common getNextRecord()\n    {\n        if (queryRun && queryRun.next())\n        {\n            this.custTable = queryRun.get(tableNum(CustTable));\n            return this.custTable;\n        }\n        \n        return null;\n    }\n    \n    /// <summary>\n    /// Custom calculated field for customer risk score\n    /// </summary>\n    [ERExpressionFunction('CustomerRiskScore')]\n    public static real calculateRiskScore(str _accountNum)\n    {\n        CustTable custTable;\n        CustTrans custTrans;\n        real riskScore = 0.0;\n        \n        try\n        {\n            select custTable where custTable.AccountNum == _accountNum;\n            \n            if (!custTable)\n                return 0.0;\n                \n            // Calculate based on payment history\n            while select sum(AmountCur) from custTrans\n                where custTrans.AccountNum == _accountNum\n                   && custTrans.TransDate >= today() - 365\n                   && custTrans.TransType == LedgerTransType::Payment\n            {\n                if (custTrans.AmountCur < 0)\n                    riskScore += abs(custTrans.AmountCur) * 0.1;\n            }\n            \n            // Apply customer group multiplier\n            switch (custTable.CustGroup)\n            {\n                case '10': // High risk group\n                    riskScore *= 1.5;\n                    break;\n                case '20': // Medium risk\n                    riskScore *= 1.2;\n                    break;\n                default:\n                    break;\n            }\n        }\n        catch (Exception::Error)\n        {\n            warning(strFmt(\"Risk calculation failed for customer %1\", _accountNum));\n        }\n        \n        return riskScore;\n    }\n}"
+        },
+        {
+          "title": "ER Format Execution with Custom Pre/Post Processing",
+          "description": "Advanced ER format execution with custom document lifecycle management and business logic integration",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Custom ER format executor with enhanced document processing\n/// </summary>\nclass ERCustomFormatExecutor\n{\n    private ERFormatMappingId formatMappingId;\n    private ERModelMappingId modelMappingId;\n    private DocuRef docuRef;\n    \n    protected void new(ERFormatMappingId _formatMappingId, ERModelMappingId _modelMappingId)\n    {\n        this.formatMappingId = _formatMappingId;\n        this.modelMappingId = _modelMappingId;\n    }\n    \n    public static ERCustomFormatExecutor construct(ERFormatMappingId _formatMappingId, ERModelMappingId _modelMappingId)\n    {\n        return new ERCustomFormatExecutor(_formatMappingId, _modelMappingId);\n    }\n    \n    /// <summary>\n    /// Execute ER format with comprehensive error handling and logging\n    /// </summary>\n    public container executeFormat(Map _parameters = null)\n    {\n        ERFormatMappingRun formatRun;\n        ERModelMappingDestinationRun destinationRun;\n        ERDocuManagementParameters docuParams;\n        System.IO.Stream outputStream;\n        container result;\n        \n        try\n        {\n            ttsbegin;\n            \n            // Pre-processing: Validate configuration and parameters\n            this.validateConfiguration();\n            this.logExecutionStart();\n            \n            // Create ER runtime context with parameters\n            ERModelMappingRuntimeContext runtimeContext = this.createRuntimeContext(_parameters);\n            \n            // Initialize format mapping run\n            formatRun = ERFormatMappingRun::constructForFormatMappingId(this.formatMappingId);\n            formatRun.init(runtimeContext);\n            \n            // Set up document management for generated output\n            docuParams = this.setupDocumentManagement();\n            formatRun.setDocuManagementParameters(docuParams);\n            \n            // Execute the format mapping\n            destinationRun = formatRun.run();\n            \n            if (destinationRun)\n            {\n                // Post-processing: Handle generated document\n                outputStream = destinationRun.getStream();\n                this.docuRef = this.attachToDocumentManagement(outputStream);\n                \n                // Custom business logic after generation\n                this.executePostProcessingActions();\n                \n                result = [true, this.docuRef.RecId, destinationRun.getFileName()];\n                \n                info(strFmt(\"ER format executed successfully. Document: %1\", this.docuRef.RecId));\n            }\n            else\n            {\n                throw error(\"ER format execution failed - no output generated\");\n            }\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            this.logExecutionError(infolog.text());\n            result = [false, 0, \"\"];\n        }\n        finally\n        {\n            this.cleanupResources();\n        }\n        \n        return result;\n    }\n    \n    private ERModelMappingRuntimeContext createRuntimeContext(Map _parameters)\n    {\n        ERModelMappingRuntimeContext context;\n        ERDataContainerParameterized paramContainer;\n        MapEnumerator mapEnum;\n        \n        context = ERModelMappingRuntimeContext::construct();\n        \n        if (_parameters && _parameters.elements())\n        {\n            paramContainer = ERDataContainerParameterized::construct();\n            mapEnum = _parameters.getEnumerator();\n            \n            while (mapEnum.moveNext())\n            {\n                paramContainer.setValueByName(mapEnum.currentKey(), mapEnum.currentValue());\n            }\n            \n            context.setParameters(paramContainer);\n        }\n        \n        // Set company context for cross-company scenarios\n        context.setDefaultCompany(curext());\n        \n        return context;\n    }\n    \n    private void validateConfiguration()\n    {\n        ERFormatMappingTable formatMapping;\n        ERModelMappingTable modelMapping;\n        \n        // Validate format mapping exists and is active\n        select firstonly formatMapping\n            where formatMapping.MappingId == this.formatMappingId\n               && formatMapping.Status == ERConfigurationStatus::Completed;\n               \n        if (!formatMapping)\n        {\n            throw error(strFmt(\"Format mapping %1 not found or inactive\", this.formatMappingId));\n        }\n        \n        // Validate model mapping compatibility\n        select firstonly modelMapping\n            where modelMapping.MappingId == this.modelMappingId\n               && modelMapping.RootDefinitionId == formatMapping.RootDefinitionId;\n               \n        if (!modelMapping)\n        {\n            throw error(strFmt(\"Model mapping %1 incompatible with format %2\", \n                this.modelMappingId, this.formatMappingId));\n        }\n    }\n    \n    private DocuRef attachToDocumentManagement(System.IO.Stream _outputStream)\n    {\n        DocuValue docuValue;\n        DocuRef localDocuRef;\n        \n        ttsbegin;\n        \n        // Create document reference\n        localDocuRef.RefTableId = tableNum(ERFormatMappingTable);\n        localDocuRef.RefRecId = ERFormatMappingTable::findByMappingId(this.formatMappingId).RecId;\n        localDocuRef.TypeId = \"File\";\n        localDocuRef.Name = strFmt(\"ER_Output_%1_%2\", this.formatMappingId, DateTimeUtil::utcNow());\n        localDocuRef.insert();\n        \n        // Store document content\n        docuValue.RefRecId = localDocuRef.RecId;\n        docuValue.FileContents = _outputStream.ToByteArray();\n        docuValue.insert();\n        \n        ttscommit;\n        \n        return localDocuRef;\n    }\n    \n    private void executePostProcessingActions()\n    {\n        // Override in derived classes for custom business logic\n        // Examples: Send email notifications, update workflow status, etc.\n        info(\"Post-processing completed for ER document generation\");\n    }\n    \n    private void logExecutionStart()\n    {\n        SysOperationProgress::setCaption(\"Executing ER Format\");\n        SysOperationProgress::setDescription(strFmt(\"Format: %1\", this.formatMappingId));\n    }\n    \n    private void logExecutionError(str _errorMessage)\n    {\n        EventLogEntry::writeError(_errorMessage, \n            \"ERCustomFormatExecutor\", \n            strFmt(\"Format: %1, Model: %2\", this.formatMappingId, this.modelMappingId));\n    }\n    \n    private void cleanupResources()\n    {\n        // Cleanup any temporary resources, close streams, etc.\n        SysOperationProgress::setCaption(\"\");\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "ER framework separates data modeling from format configuration — use ERIModelMappingDataSourceView for complex data sources that exceed configuration capabilities",
+        "ERFormatMappingRun.run() is the core execution entry point — always wrap in proper transaction boundaries and error handling for production scenarios",
+        "Custom ER expressions via ERExpressionFunction attribute enable X++ method invocation from configurations — essential for complex business calculations",
+        "ERModelMappingRuntimeContext carries execution parameters and company context — properly initialize for cross-company and parameterized reports",
+        "Document lifecycle integration through ERDocuManagementParameters enables seamless attachment to business records and workflow integration"
+      ],
+      "gotchas": [
+        "ER configurations are cached aggressively — changes require ERMetadataProvider.refresh() or application restart in development environments, leading to stale configuration behavior",
+        "Cross-company ER execution doesn't automatically switch company context in custom data providers — manually set curext() in ERIModelMappingDataSourceView implementations or face data scope issues",
+        "ERExpressionFunction methods must be static and thread-safe — instance methods or non-static fields cause runtime failures in multi-user scenarios"
+      ],
+      "performance_tips": [
+        "Implement custom ERIModelMappingDataSourceView for complex queries instead of nested ER model mappings — reduces query complexity and improves execution speed by up to 300%",
+        "Use ERFormatMappingRun.setGenerateInMemory(true) for small documents to avoid file system overhead — particularly beneficial for documents under 10MB in high-volume scenarios"
+      ],
+      "related_topics": [
+        "xpp_batch",
+        "xpp_sysoperation",
+        "rep_ssrs_integration"
+      ],
+      "quiz": [
+        {
+          "q": "What is the primary advantage of using ERIModelMappingDataSourceView over standard ER model mapping configurations?",
+          "options": [
+            "Better performance in all scenarios",
+            "Ability to implement complex business logic and dynamic queries in X++",
+            "Automatic transaction management",
+            "Built-in error handling"
+          ],
+          "answer": 1,
+          "explanation": "Why B is correct: ERIModelMappingDataSourceView allows developers to implement complex data retrieval logic, dynamic query building, and business calculations that cannot be achieved through ER's configuration-driven model mappings alone. This is essential for scenarios requiring runtime decision-making, complex joins, or advanced data transformations."
+        },
+        {
+          "q": "When implementing custom ERExpressionFunction methods for ER configurations, which constraint must be observed?",
+          "options": [
+            "Methods must be static and thread-safe",
+            "Methods must return container types only",
+            "Methods must be marked as public only",
+            "Methods can only access current company data"
+          ],
+          "answer": 0,
+          "explanation": "Why A is correct: ERExpressionFunction methods are invoked by the ER runtime in potentially multi-threaded scenarios and must be static to ensure they can be called without class instantiation. Thread-safety is crucial because multiple ER executions may invoke these methods concurrently."
+        },
+        {
+          "q": "Which class provides the core abstraction for ER format execution and output generation?",
+          "options": [
+            "ERModelMappingRun",
+            "ERDataModelMappingRuntimeContext",
+            "ERFormatMappingRun",
+            "ERConfigurationProvider"
+          ],
+          "answer": 2,
+          "explanation": "Why C is correct: ERFormatMappingRun is the central execution engine for ER formats. It orchestrates the entire format execution process, from data model binding to output generation, and provides the run() method that produces the final document or data export."
+        }
+      ]
+    },
+    "generated_date": "2026-05-10",
+    "auto_generated": true
   }
 ]

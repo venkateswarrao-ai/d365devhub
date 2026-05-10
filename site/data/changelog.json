@@ -1,5 +1,13 @@
 [
   {
+    "date": "May 10",
+    "tag": "LESSON",
+    "title": "Electronic Reporting (ER) Framework",
+    "section": "Reporting",
+    "level": "Expert",
+    "id": "rep_er_framework"
+  },
+  {
     "date": "May 09",
     "tag": "LESSON",
     "title": "Sensitive Field Encryption in D365",
@@ -230,13 +238,5 @@
     "section": "Finance",
     "level": "Expert",
     "id": "fin_bank_reconcile"
-  },
-  {
-    "date": "Apr 09",
-    "tag": "LESSON",
-    "title": "GTE Tax Engine Configuration & X++",
-    "section": "Finance",
-    "level": "Expert",
-    "id": "fin_tax_engine"
   }
 ]

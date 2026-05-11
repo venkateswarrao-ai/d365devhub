@@ -1,5 +1,13 @@
 [
   {
+    "date": "May 11",
+    "tag": "LESSON",
+    "title": "Financial Reporting (Management Reporter)",
+    "section": "Reporting",
+    "level": "Intermediate",
+    "id": "rep_financial_reports"
+  },
+  {
     "date": "May 10",
     "tag": "LESSON",
     "title": "Electronic Reporting (ER) Framework",
@@ -230,13 +238,5 @@
     "section": "Finance",
     "level": "Expert",
     "id": "fin_budget_control"
-  },
-  {
-    "date": "Apr 10",
-    "tag": "LESSON",
-    "title": "Bank Reconciliation Automation",
-    "section": "Finance",
-    "level": "Expert",
-    "id": "fin_bank_reconcile"
   }
 ]

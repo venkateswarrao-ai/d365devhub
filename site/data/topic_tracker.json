@@ -1,5 +1,5 @@
 {
-  "last_index": 61,
+  "last_index": 62,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -74,9 +74,10 @@
     "sec_xds_policies",
     "sec_audit_trail",
     "sec_data_encryption",
-    "rep_er_framework"
+    "rep_er_framework",
+    "rep_financial_reports"
   ],
-  "last_run": "2026-05-10",
-  "last_title": "Electronic Reporting (ER) Framework",
+  "last_run": "2026-05-11",
+  "last_title": "Financial Reporting (Management Reporter)",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

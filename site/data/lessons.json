@@ -6133,5 +6133,95 @@
     },
     "generated_date": "2026-05-11",
     "auto_generated": true
+  },
+  {
+    "id": "rep_power_bi_d365",
+    "title": "Power BI Embedded in D365 F&O",
+    "section": "Reporting",
+    "level": "Intermediate",
+    "duration": "25 min read",
+    "tags": [
+      "Power BI",
+      "Reporting",
+      "Analytics",
+      "Integration",
+      "Workspaces"
+    ],
+    "summary": "Learn to integrate Power BI reports directly into D365 F&O workspaces and forms using PowerBIReportHelper and custom X++ code.",
+    "content": {
+      "overview": "Power BI embedded integration in D365 F&O allows you to surface real-time analytics directly within the application's user interface. This native integration eliminates the need for users to switch between systems, providing contextual reporting within workspaces, forms, and dashboards. The integration leverages the PowerBIReportHelper framework and Azure AD authentication to securely embed reports while maintaining D365's security model.\n\nThis approach is particularly powerful for operational dashboards where users need immediate access to KPIs and analytics without breaking their workflow. Unlike traditional SSRS reports that are static and batch-oriented, embedded Power BI reports provide interactive, real-time visualizations that can be filtered based on the current user's context and security permissions.\n\nThe integration requires understanding of both X++ development patterns and Power BI report configuration, making it essential for developers building modern, data-driven D365 F&O solutions.",
+      "theory": "The Power BI embedded architecture in D365 F&O relies on the PowerBIReportHelper class and the PowerBIReportPart form part to render reports within the application. The framework uses OAuth2 authentication through Azure AD to establish secure connections to Power BI workspaces. The PowerBIConfiguration table stores workspace and report metadata, while the PowerBIReportHelper class manages authentication tokens and report URLs.\n\nThe integration follows a three-tier approach: the PowerBIReportPart form control handles UI rendering, PowerBIReportHelper manages authentication and URL generation, and PowerBIConfiguration provides metadata storage. The framework supports both user-based and service principal authentication models. For enterprise deployments, service principal authentication is preferred as it provides better security and doesn't require individual user Power BI Pro licenses.\n\nKey AOT objects include the PowerBIReportPart form part, PowerBIReportHelper class, PowerBIConfiguration table, and various enums like PowerBIAccessModel and PowerBIAuthenticationMode. The framework also integrates with the SysAppWorkspace classes to enable contextual filtering based on the current business data context.",
+      "code_examples": [
+        {
+          "title": "Basic Power BI Report Integration in Workspace",
+          "description": "Demonstrates how to add a Power BI report to a custom workspace using PowerBIReportHelper",
+          "language": "xpp",
+          "code": "public class CustomSalesWorkspace extends SysAppWorkspace\n{\n    private PowerBIReportHelper powerBIHelper;\n    private str reportId;\n    private str workspaceId;\n\n    protected void initializeWorkspace()\n    {\n        super();\n        \n        // Initialize Power BI configuration\n        powerBIHelper = PowerBIReportHelper::newFromConfiguration();\n        \n        // Set report identifiers from Power BI\n        reportId = 'a1b2c3d4-e5f6-7890-abcd-ef1234567890';\n        workspaceId = 'workspace-guid-from-powerbi';\n        \n        this.setupPowerBIReport();\n    }\n\n    private void setupPowerBIReport()\n    {\n        PowerBIConfiguration config;\n        \n        ttsbegin;\n        try\n        {\n            // Check if configuration exists\n            select firstonly config\n                where config.ReportId == reportId;\n                \n            if (!config.RecId)\n            {\n                // Create new configuration record\n                config.clear();\n                config.ReportId = reportId;\n                config.WorkspaceId = workspaceId;\n                config.ReportName = 'Sales Performance Dashboard';\n                config.AccessModel = PowerBIAccessModel::UserOwnsData;\n                config.AuthenticationMode = PowerBIAuthenticationMode::ServicePrincipal;\n                config.IsActive = true;\n                config.insert();\n                \n                info('Power BI report configuration created successfully.');\n            }\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            error('Failed to setup Power BI configuration.');\n            throw Exception::Error;\n        }\n    }\n\n    public str getPowerBIEmbedUrl()\n    {\n        str embedUrl;\n        \n        try\n        {\n            // Generate embed URL with current user context\n            embedUrl = powerBIHelper.getReportEmbedUrl(\n                workspaceId,\n                reportId,\n                this.getCurrentUserFilters()\n            );\n        }\n        catch (Exception::Error)\n        {\n            error('Failed to generate Power BI embed URL.');\n            embedUrl = '';\n        }\n        \n        return embedUrl;\n    }\n\n    private container getCurrentUserFilters()\n    {\n        container filters = conNull();\n        DirPersonUser userInfo;\n        \n        // Add user-specific filters\n        select firstonly userInfo\n            where userInfo.User == curUserId();\n            \n        if (userInfo.RecId)\n        {\n            // Add legal entity filter\n            filters = conIns(filters, 1, ['LegalEntity', curExt()]);\n            \n            // Add user department filter if applicable\n            if (userInfo.PersonnelNumber)\n            {\n                filters = conIns(filters, 2, ['Department', this.getUserDepartment(userInfo.PersonnelNumber)]);\n            }\n        }\n        \n        return filters;\n    }\n}"
+        },
+        {
+          "title": "Form Integration with Contextual Filtering",
+          "description": "Shows how to embed Power BI reports in forms with dynamic filtering based on current record context",
+          "language": "xpp",
+          "code": "[Form]\npublic class SalesOrderPowerBIForm extends FormRun\n{\n    PowerBIReportPart powerBIReportPart;\n    SalesTable currentSalesOrder;\n    \n    public void init()\n    {\n        super();\n        \n        // Get reference to Power BI form part\n        powerBIReportPart = this.design().controlName('PowerBIReportGroup').controlName('PowerBIReport') as PowerBIReportPart;\n        \n        if (powerBIReportPart)\n        {\n            // Configure the report part\n            powerBIReportPart.parmReportId('sales-order-analytics-report-id');\n            powerBIReportPart.parmWorkspaceId('analytics-workspace-id');\n            powerBIReportPart.parmAutoRefresh(true);\n            powerBIReportPart.parmRefreshInterval(300000); // 5 minutes\n        }\n    }\n    \n    public void run()\n    {\n        super();\n        \n        // Load initial Power BI report\n        this.refreshPowerBIReport();\n    }\n    \n    [DataSource]\n    public class SalesTable\n    {\n        public void active()\n        {\n            super();\n            \n            // Refresh Power BI when record changes\n            element.currentSalesOrder = this.cursor();\n            element.refreshPowerBIReport();\n        }\n    }\n    \n    private void refreshPowerBIReport()\n    {\n        PowerBIReportHelper helper;\n        str embedUrl;\n        container filters;\n        \n        if (!powerBIReportPart || !currentSalesOrder.RecId)\n        {\n            return;\n        }\n        \n        try\n        {\n            helper = PowerBIReportHelper::newFromConfiguration();\n            \n            // Build filters based on current sales order\n            filters = this.buildReportFilters();\n            \n            // Generate filtered embed URL\n            embedUrl = helper.getReportEmbedUrlWithFilters(\n                powerBIReportPart.parmWorkspaceId(),\n                powerBIReportPart.parmReportId(),\n                filters\n            );\n            \n            // Update the Power BI control\n            powerBIReportPart.parmEmbedUrl(embedUrl);\n            powerBIReportPart.refresh();\n            \n            info(strFmt('Power BI report refreshed for Sales Order: %1', currentSalesOrder.SalesId));\n        }\n        catch (Exception::Error)\n        {\n            error('Failed to refresh Power BI report.');\n        }\n    }\n    \n    private container buildReportFilters()\n    {\n        container filters = conNull();\n        CustTable custTable;\n        \n        if (currentSalesOrder.RecId)\n        {\n            // Add sales order filter\n            filters = conIns(filters, 1, [\n                'SalesOrder',\n                'SalesId',\n                'eq',\n                currentSalesOrder.SalesId\n            ]);\n            \n            // Add customer filter\n            filters = conIns(filters, 2, [\n                'Customer',\n                'AccountNum',\n                'eq',\n                currentSalesOrder.CustAccount\n            ]);\n            \n            // Add date range filter (last 12 months)\n            date fromDate = today() - 365;\n            filters = conIns(filters, 3, [\n                'OrderDate',\n                'CreatedDateTime',\n                'gte',\n                DateTimeUtil::newDateTime(fromDate, 0)\n            ]);\n            \n            // Add legal entity filter\n            filters = conIns(filters, 4, [\n                'LegalEntity',\n                'DataAreaId',\n                'eq',\n                currentSalesOrder.dataAreaId\n            ]);\n        }\n        \n        return filters;\n    }\n    \n    [Control('RefreshReportButton')]\n    public class RefreshReportButton\n    {\n        public void clicked()\n        {\n            super();\n            \n            // Manual refresh with loading indicator\n            element.setTimeOut('refreshPowerBIReport', 100, false);\n        }\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "PowerBIReportHelper class manages authentication, URL generation, and report configuration for embedded Power BI integration",
+        "PowerBIConfiguration table stores report metadata including workspace IDs, authentication modes, and access models",
+        "Service Principal authentication is recommended for production environments to avoid individual user licensing requirements",
+        "PowerBIReportPart form control handles the actual rendering of Power BI reports within D365 F&O forms and workspaces",
+        "Contextual filtering can be implemented using container-based filter parameters to provide dynamic, record-specific analytics"
+      ],
+      "gotchas": [
+        "Power BI Pro licenses are required for UserOwnsData model — use ServicePrincipal authentication with Premium capacity to avoid per-user licensing costs",
+        "Embed URLs have expiration tokens — implement proper token refresh logic using PowerBIReportHelper.refreshAccessToken() to prevent authentication failures",
+        "Cross-origin resource sharing (CORS) restrictions may block reports — ensure Power BI workspace settings allow embedding from your D365 F&O domain"
+      ],
+      "performance_tips": [
+        "Cache PowerBIReportHelper instances at form level rather than recreating for each refresh to reduce authentication overhead",
+        "Implement intelligent refresh strategies using form datasource active() events rather than timer-based refreshes to minimize unnecessary API calls"
+      ],
+      "related_topics": [
+        "rep_ssrs_custom",
+        "xpp_sysoperation"
+      ],
+      "quiz": [
+        {
+          "q": "Which class is primarily responsible for managing Power BI authentication and URL generation in D365 F&O?",
+          "options": [
+            "PowerBIConfiguration",
+            "PowerBIReportHelper",
+            "PowerBIReportPart",
+            "SysAppWorkspace"
+          ],
+          "answer": 1,
+          "explanation": "PowerBIReportHelper is the core class that handles authentication token management, embed URL generation, and integration with Power BI services."
+        },
+        {
+          "q": "What is the recommended authentication mode for production Power BI embedded implementations?",
+          "options": [
+            "UserOwnsData with individual licenses",
+            "ServicePrincipal with Premium capacity",
+            "Anonymous access",
+            "Windows Authentication"
+          ],
+          "answer": 1,
+          "explanation": "ServicePrincipal authentication with Premium capacity avoids individual user Power BI Pro license requirements and provides better security for enterprise deployments."
+        },
+        {
+          "q": "Which container structure is used to pass filters to Power BI reports in the getReportEmbedUrlWithFilters() method?",
+          "options": [
+            "Simple string concatenation",
+            "JSON serialized objects",
+            "Container with filter metadata arrays",
+            "XML configuration"
+          ],
+          "answer": 2,
+          "explanation": "The method expects containers with filter metadata including table name, field name, operator, and value arranged as nested container structures."
+        }
+      ]
+    },
+    "generated_date": "2026-05-12",
+    "auto_generated": true
   }
 ]

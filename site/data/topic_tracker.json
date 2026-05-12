@@ -1,5 +1,5 @@
 {
-  "last_index": 62,
+  "last_index": 63,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -75,9 +75,10 @@
     "sec_audit_trail",
     "sec_data_encryption",
     "rep_er_framework",
-    "rep_financial_reports"
+    "rep_financial_reports",
+    "rep_power_bi_d365"
   ],
-  "last_run": "2026-05-11",
-  "last_title": "Financial Reporting (Management Reporter)",
+  "last_run": "2026-05-12",
+  "last_title": "Power BI Embedded in D365 F&O",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

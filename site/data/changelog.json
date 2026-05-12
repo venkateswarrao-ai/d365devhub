@@ -1,5 +1,13 @@
 [
   {
+    "date": "May 12",
+    "tag": "LESSON",
+    "title": "Power BI Embedded in D365 F&O",
+    "section": "Reporting",
+    "level": "Intermediate",
+    "id": "rep_power_bi_d365"
+  },
+  {
     "date": "May 11",
     "tag": "LESSON",
     "title": "Financial Reporting (Management Reporter)",
@@ -230,13 +238,5 @@
     "section": "Finance",
     "level": "Expert",
     "id": "fin_fixed_assets"
-  },
-  {
-    "date": "Apr 11",
-    "tag": "LESSON",
-    "title": "Budget Control & Encumbrance X++",
-    "section": "Finance",
-    "level": "Expert",
-    "id": "fin_budget_control"
   }
 ]

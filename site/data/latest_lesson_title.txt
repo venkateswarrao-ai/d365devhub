@@ -1,1 +1,1 @@
-Power BI Embedded in D365 F&O
+SSRS RDL Design & Report DP Class

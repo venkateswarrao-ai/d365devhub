@@ -6223,5 +6223,97 @@
     },
     "generated_date": "2026-05-12",
     "auto_generated": true
+  },
+  {
+    "id": "rep_ssrs_rdl",
+    "title": "SSRS RDL Design & Report DP Class",
+    "section": "Reporting",
+    "level": "Expert",
+    "duration": "25 min read",
+    "tags": [
+      "SSRS",
+      "RDL",
+      "ReportDataProvider",
+      "TmpTables",
+      "SRSReportDataProviderBase"
+    ],
+    "summary": "Master advanced SSRS RDL design patterns and Report Data Provider class architecture for complex D365 F&O reporting scenarios.",
+    "content": {
+      "overview": "SSRS RDL (Report Definition Language) files in D365 F&O work in conjunction with Report Data Provider (DP) classes to create sophisticated reports that leverage X++ business logic while providing rich formatting capabilities. The DP class serves as the bridge between D365 business data and the SSRS rendering engine, handling complex data transformations, calculations, and temporary table population that would be impossible or inefficient to perform directly in SSRS expressions.\n\nUnlike simple query-based reports, DP-class reports excel at scenarios requiring cross-company data aggregation, complex business rule calculations, hierarchical data structures, or integration with external systems. The pattern follows a contract-based approach where parameters are defined in separate contract classes, data is processed in the DP class's processReport() method, and results are exposed through temporary tables that SSRS consumes as datasets.\n\nThis architecture becomes critical when building reports that must maintain D365's security model, respect dimension frameworks, handle complex pricing calculations, or integrate with financial consolidation processes that span multiple legal entities.",
+      "theory": "The SSRS RDL + DP class pattern in D365 F&O follows a multi-tier architecture where the RDL defines presentation logic while the DP class handles all data access and business logic. The SRSReportDataProviderBase framework provides the foundation, requiring classes to extend this base and implement the processReport() method. The framework automatically handles parameter binding through SRSReportDataContract classes, manages query execution contexts, and provides hooks for pre/post-processing.\n\nTemporary tables (extending TmpTableHelper) serve as the data contract between X++ and SSRS, with their structure defining the available fields in the SSRS dataset. The SRSReportDataProviderPreProcess and SRSReportDataProviderPostProcess attributes control execution timing, while the SRSReportParameterAttribute decorates contract properties to define parameter metadata.\n\nThe rendering pipeline follows this sequence: Parameter collection → Contract validation → DP class instantiation → processReport() execution → Temporary table population → RDL dataset binding → SSRS rendering. Understanding this flow is crucial for debugging performance issues, implementing proper error handling, and designing scalable report architectures that can handle large datasets without memory exhaustion.",
+      "code_examples": [
+        {
+          "title": "Complete DP Class with Contract and Temporary Table",
+          "description": "Production-ready DP class structure showing contract integration, temporary table population, and proper error handling",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Data provider class for Customer Aging with Credit Limit analysis\n/// </summary>\n[SRSReportParameterAttribute(classStr(CustomerAgingContract))]\nclass CustomerAgingDP extends SRSReportDataProviderBase\n{\n    CustomerAgingTmp customerAgingTmp;\n    CustomerAgingContract contract;\n    \n    [SRSReportDataSetAttribute(tableStr(CustomerAgingTmp))]\n    public CustomerAgingTmp getCustomerAgingTmp()\n    {\n        select customerAgingTmp;\n        return customerAgingTmp;\n    }\n    \n    public void processReport()\n    {\n        QueryRun queryRun;\n        CustTrans custTrans;\n        CustTable custTable;\n        DimensionAttributeValueSetStorage dimStorage;\n        TransDate asOfDate;\n        AmountCur aging30, aging60, aging90, aging120;\n        \n        contract = this.parmDataContract() as CustomerAgingContract;\n        asOfDate = contract.parmAsOfDate();\n        \n        ttsbegin;\n        try\n        {\n            // Clear any existing temp records for this user\n            delete_from customerAgingTmp \n                where customerAgingTmp.SessionId == sessionId();\n            \n            queryRun = new QueryRun(contract.getQuery());\n            \n            while (queryRun.next())\n            {\n                custTable = queryRun.get(tableNum(CustTable));\n                \n                // Calculate aging buckets using CustAgingSnapshot\n                this.calculateAgingBuckets(custTable.AccountNum, asOfDate, aging30, aging60, aging90, aging120);\n                \n                // Populate temp table with calculated values\n                customerAgingTmp.clear();\n                customerAgingTmp.SessionId = sessionId();\n                customerAgingTmp.AccountNum = custTable.AccountNum;\n                customerAgingTmp.Name = custTable.name();\n                customerAgingTmp.CreditMax = custTable.CreditMax;\n                customerAgingTmp.CurrencyCode = custTable.Currency;\n                customerAgingTmp.Aging30 = aging30;\n                customerAgingTmp.Aging60 = aging60;\n                customerAgingTmp.Aging90 = aging90;\n                customerAgingTmp.Aging120 = aging120;\n                customerAgingTmp.TotalOutstanding = aging30 + aging60 + aging90 + aging120;\n                customerAgingTmp.CreditUtilization = custTable.CreditMax ? \n                    (customerAgingTmp.TotalOutstanding / custTable.CreditMax) * 100 : 0;\n                \n                // Add dimension analysis if enabled\n                if (contract.parmIncludeDimensions())\n                {\n                    dimStorage = DimensionAttributeValueSetStorage::find(custTable.DefaultDimension);\n                    customerAgingTmp.Department = dimStorage.getDisplayValueByDimensionAttribute(\n                        DimensionAttribute::findByName('Department').RecId);\n                    customerAgingTmp.CostCenter = dimStorage.getDisplayValueByDimensionAttribute(\n                        DimensionAttribute::findByName('CostCenter').RecId);\n                }\n                \n                customerAgingTmp.insert();\n            }\n            \n            ttscommit;\n            info(strFmt(\"Customer aging report generated for %1 customers as of %2\", \n                SysQuery::countTotal(customerAgingTmp), asOfDate));\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            error(\"Failed to generate customer aging report: \" + infolog.text());\n            throw Exception::Error;\n        }\n    }\n    \n    private void calculateAgingBuckets(CustAccount _accountNum, TransDate _asOfDate, \n                                     AmountCur aging30, AmountCur aging60, AmountCur aging90, AmountCur aging120)\n    {\n        CustTrans custTrans;\n        int daysDiff;\n        \n        aging30 = aging60 = aging90 = aging120 = 0;\n        \n        while select AmountCur, TransDate from custTrans\n            where custTrans.AccountNum == _accountNum\n               && custTrans.AmountCur != 0\n        {\n            daysDiff = _asOfDate - custTrans.TransDate;\n            \n            if (daysDiff <= 30)\n                aging30 += custTrans.AmountCur;\n            else if (daysDiff <= 60)\n                aging60 += custTrans.AmountCur;\n            else if (daysDiff <= 90)\n                aging90 += custTrans.AmountCur;\n            else\n                aging120 += custTrans.AmountCur;\n        }\n    }\n}"
+        },
+        {
+          "title": "Advanced RDL Dataset Configuration with Calculated Fields",
+          "description": "SSRS RDL configuration showing proper dataset binding, calculated fields, and parameter integration",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Contract class for Customer Aging report parameters\n/// </summary>\n[DataContractAttribute]\nclass CustomerAgingContract extends SRSReportDataContractBase\n{\n    TransDate asOfDate;\n    NoYes includeDimensions;\n    Query query;\n    \n    [DataMemberAttribute('AsOfDate'),\n     SRSReportParameterAttribute(SRSReportParameterType::ReportParameter)]\n    public TransDate parmAsOfDate(TransDate _asOfDate = asOfDate)\n    {\n        asOfDate = _asOfDate;\n        return asOfDate;\n    }\n    \n    [DataMemberAttribute('IncludeDimensions'),\n     SRSReportParameterAttribute(SRSReportParameterType::ReportParameter)]\n    public NoYes parmIncludeDimensions(NoYes _includeDimensions = includeDimensions)\n    {\n        includeDimensions = _includeDimensions;\n        return includeDimensions;\n    }\n    \n    public Query getQuery()\n    {\n        if (!query)\n        {\n            query = new Query();\n            QueryBuildDataSource qbds = query.addDataSource(tableNum(CustTable));\n            qbds.addRange(fieldNum(CustTable, Blocked)).value(queryValue(CustVendorBlocked::No));\n            // Add dynamic ranges based on parameters\n            if (this.parmAsOfDate())\n            {\n                QueryBuildRange qbr = qbds.addRange(fieldNum(CustTable, CreatedDate));\n                qbr.value(queryRange(dateNull(), this.parmAsOfDate()));\n            }\n        }\n        return query;\n    }\n}\n\n/// <summary>\n/// Temporary table for Customer Aging report data\n/// </summary>\nclass CustomerAgingTmp extends TmpTableHelper\n{\n    public static CustomerAgingTmp construct()\n    {\n        return new CustomerAgingTmp();\n    }\n    \n    public void initValue()\n    {\n        super();\n        this.SessionId = sessionId();\n        this.CurrencyCode = Ledger::accountingCurrency();\n    }\n    \n    // Override for custom cleanup logic\n    public void delete()\n    {\n        ttsbegin;\n        delete_from this where this.SessionId == sessionId();\n        ttscommit;\n        info(\"Customer aging temporary data cleared\");\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "DP classes must extend SRSReportDataProviderBase and implement processReport() method for data population logic",
+        "Temporary tables serve as datasets in SSRS and should extend TmpTableHelper with proper SessionId management for multi-user safety",
+        "Use [SRSReportDataSetAttribute] on getter methods to expose temp tables as SSRS datasets",
+        "Contract classes handle parameter binding and should implement proper validation in the validate() method",
+        "Always wrap data processing in ttsbegin/ttscommit blocks with proper exception handling to maintain data integrity",
+        "RDL files should reference DP class temporary tables as datasets, not direct table queries for complex scenarios"
+      ],
+      "gotchas": [
+        "SessionId filtering is critical in temporary tables — failing to filter by sessionId() causes data bleeding between users in multi-user environments",
+        "Memory exhaustion occurs when processing large datasets without proper batch processing — implement pagination in processReport() for datasets exceeding 10,000 records",
+        "Parameter changes don't automatically refresh datasets — ensure contract.getQuery() rebuilds query objects when parameters change, don't cache static queries"
+      ],
+      "performance_tips": [
+        "Use exists joins instead of select statements in complex queries within processReport() to reduce database round trips",
+        "Implement proper indexing on temporary tables by overriding the init() method to create clustered indexes on frequently filtered fields like SessionId and primary business keys"
+      ],
+      "related_topics": [
+        "rep_queries",
+        "xpp_batch",
+        "xpp_sysoperation"
+      ],
+      "quiz": [
+        {
+          "q": "Which method must be implemented in a Report Data Provider class extending SRSReportDataProviderBase?",
+          "options": [
+            "executeReport()",
+            "processReport()",
+            "generateReport()",
+            "runReport()"
+          ],
+          "answer": 1,
+          "explanation": "processReport() is the mandatory method that must be implemented in DP classes. This method contains all the business logic for data processing and temporary table population that SSRS will consume as datasets."
+        },
+        {
+          "q": "What is the primary purpose of the SessionId field in temporary tables used by SSRS reports?",
+          "options": [
+            "Performance optimization",
+            "Multi-user data isolation",
+            "Report caching",
+            "Error logging"
+          ],
+          "answer": 1,
+          "explanation": "SessionId provides multi-user data isolation by ensuring each user's report execution only sees their own temporary data. Without proper SessionId filtering, users would see each other's report data, causing serious data integrity issues."
+        },
+        {
+          "q": "Which attribute is required to expose a temporary table as an SSRS dataset?",
+          "options": [
+            "[SRSReportDataAttribute]",
+            "[SRSReportDataSetAttribute]",
+            "[DataSetAttribute]",
+            "[ReportDataAttribute]"
+          ],
+          "answer": 1,
+          "explanation": "[SRSReportDataSetAttribute] must decorate getter methods that return temporary table instances to expose them as datasets that SSRS can bind to in the RDL file."
+        }
+      ]
+    },
+    "generated_date": "2026-05-13",
+    "auto_generated": true
   }
 ]

@@ -1,5 +1,5 @@
 {
-  "last_index": 63,
+  "last_index": 64,
   "completed": [
     "xpp_intro",
     "xpp_types",
@@ -76,9 +76,10 @@
     "sec_data_encryption",
     "rep_er_framework",
     "rep_financial_reports",
-    "rep_power_bi_d365"
+    "rep_power_bi_d365",
+    "rep_ssrs_rdl"
   ],
-  "last_run": "2026-05-12",
-  "last_title": "Power BI Embedded in D365 F&O",
+  "last_run": "2026-05-13",
+  "last_title": "SSRS RDL Design & Report DP Class",
   "note": "This file tracks which topics have been auto-generated. Do not delete."
 }

@@ -1,5 +1,13 @@
 [
   {
+    "date": "May 13",
+    "tag": "LESSON",
+    "title": "SSRS RDL Design & Report DP Class",
+    "section": "Reporting",
+    "level": "Expert",
+    "id": "rep_ssrs_rdl"
+  },
+  {
     "date": "May 12",
     "tag": "LESSON",
     "title": "Power BI Embedded in D365 F&O",
@@ -230,13 +238,5 @@
     "section": "Finance",
     "level": "Expert",
     "id": "fin_currency_reval"
-  },
-  {
-    "date": "Apr 12",
-    "tag": "LESSON",
-    "title": "Fixed Assets Posting & Depreciation",
-    "section": "Finance",
-    "level": "Expert",
-    "id": "fin_fixed_assets"
   }
 ]

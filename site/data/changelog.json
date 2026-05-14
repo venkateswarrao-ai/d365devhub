@@ -1,5 +1,13 @@
 [
   {
+    "date": "May 14",
+    "tag": "LESSON",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "id": "xpp_display_methods"
+  },
+  {
     "date": "May 13",
     "tag": "LESSON",
     "title": "SSRS RDL Design & Report DP Class",
@@ -230,13 +238,5 @@
     "section": "Integrations",
     "level": "Expert",
     "id": "int_service_bus"
-  },
-  {
-    "date": "Apr 13",
-    "tag": "LESSON",
-    "title": "Currency Revaluation via X++",
-    "section": "Finance",
-    "level": "Expert",
-    "id": "fin_currency_reval"
   }
 ]

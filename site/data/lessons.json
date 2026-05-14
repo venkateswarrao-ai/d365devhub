@@ -6315,5 +6315,102 @@
     },
     "generated_date": "2026-05-13",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "18 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "computed-fields",
+      "business-logic"
+    ],
+    "summary": "Master display and edit methods in X++ for creating computed fields, implementing complex business logic in forms, and enabling dynamic data presentation without modifying base table structures.",
+    "content": {
+      "overview": "Display and edit methods are X++ method patterns that enable computed fields and dynamic data presentation in forms without altering underlying table schemas. Display methods provide read-only calculated values that appear as virtual fields, while edit methods enable users to input values that trigger business logic. These methods are essential for scenarios like showing calculated totals, formatted strings, or derived status indicators. In D365 F&O architecture, they bridge the gap between data storage and presentation layers, allowing complex business rules to be applied at runtime without database overhead. Understanding their lifecycle, caching behavior, and integration with form controls is crucial for building responsive, maintainable user interfaces that meet complex business requirements while maintaining optimal performance.",
+      "theory": "Display and edit methods operate within the D365 F&O form framework as virtual table fields that execute X++ code to compute or process values. They inherit from the FormDataSource's active record context and have access to all table fields and methods. The runtime engine automatically calls display methods during form refresh cycles and caches results until the record changes. Edit methods reverse this flow, accepting user input and typically updating related fields or triggering business processes. The methods must follow specific signatures: display methods return the computed value and accept no parameters beyond the standard method signature, while edit methods accept the input value as a parameter and often return boolean success indicators. Both method types integrate with the SysTableBrowser framework for filtering and sorting, though this requires careful implementation to avoid performance issues. The FormDataSource class manages the method lifecycle, calling them through reflection during record activation and deactivation phases.",
+      "code_examples": [
+        {
+          "title": "Basic Display Method Implementation",
+          "description": "A display method that calculates and formats a customer's total outstanding balance, demonstrating proper error handling and integration with CustTable",
+          "language": "xpp",
+          "code": "// On CustTable table\ndisplay AmountMSTCur totalOutstandingBalance()\n{\n    AmountMSTCur        balance = 0.0;\n    CustTransOpen       custTransOpen;\n    \n    try\n    {\n        // Calculate total open transactions for this customer\n        select sum(AmountMST) from custTransOpen\n            where custTransOpen.AccountNum == this.AccountNum\n               && custTransOpen.AmountMST > 0;\n        \n        balance = custTransOpen.AmountMST;\n        \n        // Apply currency conversion if needed\n        if (this.Currency != CompanyInfo::standardCurrencyCode())\n        {\n            balance = Currency::amount2MST(balance, this.Currency);\n        }\n    }\n    catch (Exception::Error)\n    {\n        // Log error but don't break the form\n        error(\"Error calculating outstanding balance for customer %1\", this.AccountNum);\n        balance = 0.0;\n    }\n    \n    return balance;\n}"
+        },
+        {
+          "title": "Advanced Edit Method with Business Logic",
+          "description": "An edit method that handles credit limit changes, demonstrates validation, audit trail creation, and workflow integration",
+          "language": "xpp",
+          "code": "// On CustTable table\nedit CreditMax editCreditLimit(boolean _set = false, CreditMax _creditLimit = 0)\n{\n    CreditMax           newCreditLimit;\n    CustTable           custTableUpdate;\n    NumberSeq           numberSeq;\n    CustCreditLimitLog  creditLog;\n    \n    if (_set)\n    {\n        try\n        {\n            // Validate the new credit limit\n            if (_creditLimit < 0)\n            {\n                throw error(\"Credit limit cannot be negative\");\n            }\n            \n            // Check authorization for large increases\n            if (_creditLimit > this.CreditMax * 1.5 && _creditLimit > 50000)\n            {\n                if (!this.checkCreditLimitAuthority(_creditLimit))\n                {\n                    throw error(\"Insufficient authority for credit limit increase\");\n                }\n            }\n            \n            ttsbegin;\n            \n            // Update the record\n            custTableUpdate = CustTable::find(this.AccountNum, true);\n            custTableUpdate.CreditMax = _creditLimit;\n            custTableUpdate.update();\n            \n            // Create audit log entry\n            creditLog.clear();\n            creditLog.AccountNum = this.AccountNum;\n            creditLog.OldCreditLimit = this.CreditMax;\n            creditLog.NewCreditLimit = _creditLimit;\n            creditLog.ChangedBy = curuserid();\n            creditLog.ChangedDateTime = DateTimeUtil::utcNow();\n            \n            numberSeq = NumberSeq::newGetNum(CustParameters::numRefCreditLimitLog());\n            creditLog.LogId = numberSeq.num();\n            creditLog.insert();\n            \n            ttscommit;\n            \n            // Refresh current record\n            this.CreditMax = _creditLimit;\n            \n            info(strFmt(\"Credit limit updated to %1 for customer %2\", \n                       _creditLimit, this.AccountNum));\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            throw;\n        }\n    }\n    \n    return this.CreditMax;\n}"
+        },
+        {
+          "title": "Performance-Optimized Display Method with Caching",
+          "description": "A complex display method showing advanced caching techniques and cross-company data retrieval for vendor performance metrics",
+          "language": "xpp",
+          "code": "// On VendTable table\ndisplay str vendorPerformanceRating()\n{\n    static Map              performanceCache;\n    static utcdatetime      cacheExpiry;\n    str                     rating = 'Unknown';\n    VendInvoiceJour         vendInvoiceJour;\n    PurchTable              purchTable;\n    real                    avgDeliveryDays;\n    real                    qualityScore;\n    int                     totalOrders;\n    \n    // Initialize cache if needed\n    if (!performanceCache)\n    {\n        performanceCache = new Map(Types::String, Types::Container);\n        cacheExpiry = DateTimeUtil::addHours(DateTimeUtil::utcNow(), 4);\n    }\n    \n    // Check cache validity\n    if (DateTimeUtil::utcNow() > cacheExpiry)\n    {\n        performanceCache.clear();\n        cacheExpiry = DateTimeUtil::addHours(DateTimeUtil::utcNow(), 4);\n    }\n    \n    // Try to get from cache first\n    if (performanceCache.exists(this.AccountNum))\n    {\n        container cachedData = performanceCache.lookup(this.AccountNum);\n        return conpeek(cachedData, 1);\n    }\n    \n    try\n    {\n        // Calculate performance metrics across all companies\n        changecompany(CompanyInfo::standardCompany())\n        {\n            // Get delivery performance\n            select count(RecId), avg(DeliveryDateDiff) from purchTable\n                where purchTable.OrderAccount == this.AccountNum\n                   && purchTable.PurchStatus == PurchStatus::Received\n                   && purchTable.DeliveryDate >= today() - 365;\n            \n            totalOrders = purchTable.RecId;\n            avgDeliveryDays = purchTable.DeliveryDateDiff;\n            \n            // Get quality metrics from invoice journals\n            select avg(QualityScore) from vendInvoiceJour\n                where vendInvoiceJour.OrderAccount == this.AccountNum\n                   && vendInvoiceJour.InvoiceDate >= today() - 365\n                   && vendInvoiceJour.QualityScore > 0;\n            \n            qualityScore = vendInvoiceJour.QualityScore;\n        }\n        \n        // Calculate composite rating\n        if (totalOrders > 0)\n        {\n            real performanceIndex = 0;\n            \n            // Delivery score (inverted - lower days is better)\n            if (avgDeliveryDays > 0)\n            {\n                performanceIndex += (avgDeliveryDays <= 3 ? 40 : \n                                    avgDeliveryDays <= 7 ? 30 : \n                                    avgDeliveryDays <= 14 ? 20 : 10);\n            }\n            \n            // Quality score\n            performanceIndex += (qualityScore * 60 / 100);\n            \n            // Determine rating\n            rating = performanceIndex >= 85 ? 'Excellent' :\n                    performanceIndex >= 70 ? 'Good' :\n                    performanceIndex >= 50 ? 'Average' : 'Poor';\n        }\n        \n        // Cache the result\n        performanceCache.insert(this.AccountNum, [rating, avgDeliveryDays, qualityScore]);\n    }\n    catch (Exception::Error)\n    {\n        warning(strFmt(\"Could not calculate performance rating for vendor %1\", this.AccountNum));\n        rating = 'Error';\n    }\n    \n    return rating;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute during form refresh cycles and results are cached until record changes — avoid expensive operations without proper caching strategies",
+        "Edit methods should always validate input parameters and implement proper transaction boundaries with ttsbegin/ttscommit for data integrity",
+        "Method signatures must be exact: display methods return typed values with no input parameters, edit methods accept boolean _set and the input value parameter",
+        "Performance optimization requires static caching, especially for methods that perform database queries or complex calculations across large datasets",
+        "Integration with FormDataSource enables automatic method execution, but developers must handle exceptions gracefully to prevent form breakage"
+      ],
+      "gotchas": [
+        "Never perform DML operations in display methods — they're called frequently during form operations and will cause performance issues and potential data corruption",
+        "Edit method parameter validation must check both _set flag and input bounds — missing validation can lead to silent data corruption or runtime errors",
+        "Cross-company queries in display methods without proper caching will create severe performance bottlenecks — always implement static caching with expiry mechanisms for multi-company scenarios"
+      ],
+      "performance_tips": [
+        "Implement static Map-based caching with expiry timestamps for display methods that perform database operations, and clear cache when underlying data changes",
+        "Use select firstonly and specific field lists in display method queries rather than full table selects to minimize database round trips and memory usage"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_tables",
+        "xpp_classes"
+      ],
+      "quiz": [
+        {
+          "q": "What happens if you perform a .insert() operation inside a display method?",
+          "options": [
+            "The insert is executed normally",
+            "The form automatically caches the new record",
+            "It causes performance issues and potential data corruption",
+            "The method returns null"
+          ],
+          "answer": 2,
+          "explanation": "Display methods are called frequently during form refresh cycles and should never perform DML operations. This causes severe performance issues and can lead to unexpected database state changes or corruption."
+        },
+        {
+          "q": "In an edit method, what does the _set parameter indicate?",
+          "options": [
+            "Whether the method should validate input",
+            "Whether the user is setting a new value or just retrieving the current one",
+            "Whether transactions should be used",
+            "Whether the method should return a value"
+          ],
+          "answer": 1,
+          "explanation": "The _set parameter indicates whether the user is setting a new value (true) or the form is just retrieving the current value for display (false). This controls the method's execution path."
+        },
+        {
+          "q": "Why should display methods that query multiple companies implement caching?",
+          "options": [
+            "To comply with security requirements",
+            "To enable cross-company data access",
+            "To prevent severe performance bottlenecks from repeated cross-company queries",
+            "To maintain transaction consistency"
+          ],
+          "answer": 2,
+          "explanation": "Cross-company queries are expensive operations. Without caching, display methods would execute these queries every time the form refreshes, creating severe performance bottlenecks especially in grids with multiple records."
+        }
+      ]
+    },
+    "generated_date": "2026-05-14",
+    "auto_generated": true
   }
 ]

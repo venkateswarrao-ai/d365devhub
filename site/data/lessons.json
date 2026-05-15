@@ -6412,5 +6412,101 @@
     },
     "generated_date": "2026-05-14",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "ui-binding"
+    ],
+    "summary": "Master display and edit methods for dynamic field calculations and UI binding in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are X++ methods that provide calculated values and enable dynamic field behavior in forms, reports, and queries. Unlike regular table fields, these methods execute at runtime to compute values based on current record context or user input. Display methods are read-only calculations (like computing a customer's age from birth date), while edit methods allow two-way data binding where users can modify computed values that update underlying data. Understanding these methods is crucial for creating sophisticated business logic in forms without cluttering your data model with redundant stored fields. They're extensively used throughout standard D365 F&O forms for everything from financial calculations to inventory availability displays.",
+      "theory": "Display methods use the [Display] attribute and return a value based on the current record's data, executing every time the form refreshes or the record changes. They're bound to form controls via the DataMethod property and can access any table field or related data through joins or queries. Edit methods use the [Edit] attribute and must include both a getter (parmMethodName) and setter pattern to handle bidirectional data flow. The framework automatically calls these methods during form lifecycle events like active() and executeQuery(). Internally, the kernel caches display method results per record to avoid redundant calculations, but this cache invalidates when the record changes. Display methods can reference other display methods, but circular references will cause stack overflow. The methods execute in the table's context, giving access to this record and all its fields, plus the ability to instantiate other classes or perform complex calculations. Performance is critical since these methods can execute hundreds of times during form operations.",
+      "code_examples": [
+        {
+          "title": "Customer Age Display Method",
+          "description": "Basic display method calculating customer age from birth date with null safety and error handling",
+          "language": "xpp",
+          "code": "// On CustTable table\n[Display]\npublic int custAge()\n{\n    int age;\n    date birthDate = this.BirthDate;\n    \n    try\n    {\n        if (birthDate && birthDate <= today())\n        {\n            age = intvNo(intvNorm(birthDate, today()), intvScale::Year);\n        }\n        else\n        {\n            age = 0;\n        }\n    }\n    catch (Exception::Error)\n    {\n        age = 0;\n        warning(\"Unable to calculate customer age\");\n    }\n    \n    return age;\n}\n\n// Usage in form - bind control DataMethod property to 'custAge'\n// The method executes automatically when form displays or record changes"
+        },
+        {
+          "title": "Sales Order Total with Edit Method",
+          "description": "Advanced edit method for sales order discount percentage with validation and automatic line recalculation",
+          "language": "xpp",
+          "code": "// On SalesTable table\nprivate DiscPct discountPercentage;\n\n[Display]\npublic DiscPct orderDiscountPct(DiscPct _discountPct = discountPercentage)\n{\n    return _discountPct;\n}\n\n[Edit]\npublic boolean orderDiscountPct(boolean _set = false, DiscPct _discountPct = 0)\n{\n    boolean ret = true;\n    \n    if (_set)\n    {\n        try\n        {\n            ttsbegin;\n            \n            // Validate discount percentage\n            if (_discountPct < 0 || _discountPct > 100)\n            {\n                throw error(\"Discount percentage must be between 0 and 100\");\n            }\n            \n            // Check authorization for discount > 10%\n            if (_discountPct > 10.0 && !Security::hasMenuItemAccess(menuItemActionStr(SalesOrderHighDiscount), MenuItemType::Action))\n            {\n                throw error(\"Not authorized for discounts over 10%\");\n            }\n            \n            discountPercentage = _discountPct;\n            \n            // Update all sales lines with new discount\n            SalesLine salesLine;\n            update_recordset salesLine\n                setting LinePercent = _discountPct\n                where salesLine.SalesId == this.SalesId;\n            \n            // Recalculate order totals\n            this.calc();\n            \n            ttscommit;\n            \n            info(strFmt(\"Order discount updated to %1%\", _discountPct));\n        }\n        catch (Exception::Error)\n        {\n            ret = false;\n            if (ttsLevel())\n            {\n                ttsabort;\n            }\n        }\n    }\n    \n    return ret;\n}"
+        },
+        {
+          "title": "Inventory On-Hand Display with Caching",
+          "description": "Performance-optimized display method with caching for expensive inventory calculations",
+          "language": "xpp",
+          "code": "// On InventTable table\nprivate Map inventOnHandCache;\n\n[Display]\npublic Qty inventOnHandQty()\n{\n    Qty onHandQty;\n    str cacheKey;\n    InventDim inventDim;\n    InventSum inventSum;\n    \n    // Initialize cache if needed\n    if (!inventOnHandCache)\n    {\n        inventOnHandCache = new Map(Types::String, Types::Real);\n    }\n    \n    // Create cache key based on item and current user's default warehouse\n    cacheKey = strFmt(\"%1-%2\", this.ItemId, InventParameters::find().DefaultInventLocationId);\n    \n    // Check cache first\n    if (inventOnHandCache.exists(cacheKey))\n    {\n        onHandQty = inventOnHandCache.lookup(cacheKey);\n    }\n    else\n    {\n        try\n        {\n            // Get default inventory dimension\n            inventDim = InventDim::findOrCreate(InventParameters::find().DefaultInventLocationId, '', '', '', '', '', '', '', '', '', '', '', '');\n            \n            // Query inventory on-hand\n            select sum(PostedQty) from inventSum\n                where inventSum.ItemId == this.ItemId\n                   && inventSum.InventDimId == inventDim.inventDimId\n                   && inventSum.Closed == NoYes::No;\n            \n            onHandQty = inventSum.PostedQty;\n            \n            // Cache the result for 5 minutes\n            inventOnHandCache.insert(cacheKey, onHandQty);\n        }\n        catch (Exception::Error)\n        {\n            onHandQty = 0;\n            warning(\"Unable to retrieve on-hand quantity\");\n        }\n    }\n    \n    return onHandQty;\n}\n\n// Clear cache when inventory transactions are posted\npublic void inventTransactionPosted()\n{\n    if (inventOnHandCache)\n    {\n        inventOnHandCache = null;\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods use [Display] attribute and execute automatically when forms refresh or records change",
+        "Edit methods require both [Edit] attribute and parmMethodName pattern for bidirectional data binding",
+        "Methods execute in table context with full access to current record fields and related data",
+        "Performance matters — display methods can execute hundreds of times, so cache expensive calculations",
+        "Always include error handling and validation, especially in edit methods that modify data"
+      ],
+      "gotchas": [
+        "Circular references between display methods cause stack overflow — avoid method A calling method B that calls method A",
+        "Display methods don't automatically refresh when related data changes — you must manually call element.refresh() or reread()",
+        "Edit method parameter pattern is confusing — setter uses (_set=true, value) while getter uses (value=currentValue) as default parameter"
+      ],
+      "performance_tips": [
+        "Cache expensive calculations in private variables and only recalculate when underlying data changes",
+        "Use select firstOnly when querying for single records in display methods to avoid fetching unnecessary data"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_tables",
+        "xpp_queries"
+      ],
+      "quiz": [
+        {
+          "q": "What attribute is required for a method to be used as a display method in X++?",
+          "options": [
+            "[DisplayMethod]",
+            "[Display]",
+            "[Calculated]",
+            "[FormMethod]"
+          ],
+          "answer": 1,
+          "explanation": "The [Display] attribute is the correct syntax to mark a method as a display method in X++. This tells the framework that the method should be available for binding to form controls and will be executed automatically during form lifecycle events."
+        },
+        {
+          "q": "When does a display method execute in a D365 F&O form?",
+          "options": [
+            "Only when the form first opens",
+            "Only when user clicks the field",
+            "Automatically when the form refreshes or record changes",
+            "Only when explicitly called via X++ code"
+          ],
+          "answer": 2,
+          "explanation": "Display methods execute automatically when the form refreshes, when the current record changes, or when the form's active() method is called. This automatic execution is what makes them useful for showing calculated values that stay current with the underlying data."
+        },
+        {
+          "q": "What is the correct pattern for an edit method's setter in X++?",
+          "options": [
+            "public void methodName(value) { this.field = value; }",
+            "public boolean methodName(boolean _set, dataType _value)",
+            "[Edit] public dataType methodName(dataType _value = currentValue)",
+            "public void setMethodName(dataType _value) { }"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods use the pattern 'public boolean methodName(boolean _set, dataType _value)' where _set indicates if it's a setter call, and _value contains the new value. The method returns boolean to indicate success/failure of the operation."
+        }
+      ]
+    },
+    "generated_date": "2026-05-15",
+    "auto_generated": true
   }
 ]

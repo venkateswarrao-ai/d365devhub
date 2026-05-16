@@ -6508,5 +6508,103 @@
     },
     "generated_date": "2026-05-15",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display",
+      "edit",
+      "methods",
+      "forms",
+      "queries",
+      "calculated-fields"
+    ],
+    "summary": "Master display and edit methods to create calculated fields and dynamic UI behavior in D365 F&O forms and queries.",
+    "content": {
+      "overview": "Display and edit methods are X++ methods that provide calculated, derived, or dynamically formatted field values in forms, reports, and queries without storing data in the database. Display methods show read-only calculated values, while edit methods allow users to modify values that trigger business logic or update related fields. These methods are essential for creating rich user experiences in D365 F&O, enabling real-time calculations like aging amounts, status descriptions, and formatted concatenations.\n\nUnlike regular table fields, display/edit methods execute at runtime and can access the current record's context, related table data, and global state. They're commonly used for showing derived financial calculations, status indicators, lookup descriptions, and editable parameters that don't require persistent storage. Understanding their execution timing, caching behavior, and performance implications is crucial for building responsive forms in large-scale D365 implementations.",
+      "theory": "Display and edit methods are table or datasource methods decorated with the [Display] or [Edit] attributes that return calculated values to the UI layer. The kernel automatically recognizes these methods when they follow the naming convention display* or edit* and have appropriate return types. Display methods must return a value and cannot modify data, while edit methods can accept parameters and trigger side effects.\n\nThe execution context is critical: when called from a form datasource, these methods have access to the current record buffer and can navigate related tables. The kernel caches display method results per record to avoid redundant calculations, but cache invalidation occurs when the record changes. For queries and reports, display methods execute during result set enumeration, potentially causing N+1 query problems if not carefully designed.\n\nThe FormRun.task() method coordinates display method execution with form refresh cycles, while QueryRun handles execution during data selection. Display methods integrate with the SysQuery framework for filtering and the SysTableBrowser for generic list pages. Performance considerations include avoiding database calls in frequently-called display methods and leveraging temp tables for complex calculations.",
+      "code_examples": [
+        {
+          "title": "Customer Balance Display Method",
+          "description": "Shows how to create a display method that calculates customer balance from CustTrans",
+          "language": "xpp",
+          "code": "// On CustTable table\n[Display]\npublic display Amount displayBalance()\n{\n    CustTrans custTrans;\n    Amount balance = 0;\n    \n    try\n    {\n        // Use exists join for performance\n        select sum(AmountMST) from custTrans\n        where custTrans.AccountNum == this.AccountNum\n           && custTrans.Voucher != ''\n           && !custTrans.Settled;\n        \n        balance = custTrans.AmountMST;\n    }\n    catch (Exception::Error)\n    {\n        // Log error but don't break UI\n        warning(strFmt(\"Error calculating balance for customer %1\", this.AccountNum));\n        balance = 0;\n    }\n    \n    return balance;\n}\n\n[Display]\npublic display str displayBalanceFormatted()\n{\n    Amount balance = this.displayBalance();\n    return strFmt(\"%1 %2\", \n                  num2str(balance, -1, 2, 1, 1),\n                  CompanyInfo::standardCurrency());\n}"
+        },
+        {
+          "title": "Sales Line Edit Method with Validation",
+          "description": "Demonstrates edit method for quantity with business logic validation",
+          "language": "xpp",
+          "code": "// On SalesLine table\n[Edit]\npublic edit Qty editQtyOrdered(boolean _set = false, Qty _qty = 0)\n{\n    InventDim inventDim;\n    InventSum inventSum;\n    \n    if (_set)\n    {\n        try\n        {\n            ttsbegin;\n            \n            // Validate against available inventory\n            inventDim = InventDim::find(this.InventDimId);\n            \n            select sum(AvailPhysical) from inventSum\n            where inventSum.ItemId == this.ItemId\n               && inventSum.InventDimId == this.InventDimId;\n            \n            if (_qty > inventSum.AvailPhysical && this.itemIdRequiresInventory())\n            {\n                throw warning(strFmt(\"Insufficient inventory. Available: %1, Requested: %2\",\n                                   inventSum.AvailPhysical, _qty));\n            }\n            \n            // Update related calculations\n            this.QtyOrdered = _qty;\n            this.calcLineAmount();\n            this.calcTaxAmount();\n            \n            // Trigger form refresh for dependent fields\n            if (this.dataSource())\n            {\n                this.dataSource().executeQuery();\n            }\n            \n            ttscommit;\n        }\n        catch (Exception::Warning)\n        {\n            ttsabort;\n            // Return original value on validation failure\n            return this.QtyOrdered;\n        }\n    }\n    \n    return this.QtyOrdered;\n}\n\nprivate boolean itemIdRequiresInventory()\n{\n    InventTable inventTable = InventTable::find(this.ItemId);\n    return inventTable.ItemType == ItemType::Item;\n}"
+        },
+        {
+          "title": "Advanced Display Method with Caching",
+          "description": "Shows caching pattern for expensive calculations and cross-company scenarios",
+          "language": "xpp",
+          "code": "// On VendTable table with static caching\npublic class VendTableExtensions\n{\n    private static Map vendorRatingCache;\n    \n    private static Map getVendorRatingCache()\n    {\n        if (!vendorRatingCache)\n        {\n            vendorRatingCache = new Map(Types::String, Types::Real);\n        }\n        return vendorRatingCache;\n    }\n    \n    public static void clearVendorRatingCache()\n    {\n        vendorRatingCache = null;\n    }\n}\n\n// On VendTable table\n[Display]\npublic display Real displayVendorRating()\n{\n    Real rating;\n    str cacheKey = strFmt(\"%1-%2\", curext(), this.AccountNum);\n    Map cache = VendTableExtensions::getVendorRatingCache();\n    \n    // Check cache first\n    if (cache.exists(cacheKey))\n    {\n        return cache.lookup(cacheKey);\n    }\n    \n    try\n    {\n        // Complex cross-company calculation\n        VendTrans vendTrans;\n        PurchTable purchTable;\n        int onTimeDeliveries, totalDeliveries;\n        \n        changecompany(this.dataAreaId)\n        {\n            while select count(RecId) from purchTable\n            where purchTable.OrderAccount == this.AccountNum\n               && purchTable.PurchStatus == PurchStatus::Received\n            {\n                totalDeliveries++;\n                \n                if (purchTable.DeliveryDate <= purchTable.RequestedDeliveryDate)\n                {\n                    onTimeDeliveries++;\n                }\n            }\n        }\n        \n        rating = totalDeliveries > 0 ? \n                (real2int(onTimeDeliveries) / real2int(totalDeliveries)) * 100 : 0;\n        \n        // Cache the result for 1 hour (application domain lifetime)\n        cache.insert(cacheKey, rating);\n    }\n    catch (Exception::Error)\n    {\n        rating = 0;\n        error(strFmt(\"Error calculating vendor rating for %1\", this.AccountNum));\n    }\n    \n    return rating;\n}\n\n[Display]\npublic display str displayRatingDescription()\n{\n    Real rating = this.displayVendorRating();\n    \n    if (rating >= 90)\n        return \"Excellent\";\n    else if (rating >= 75)\n        return \"Good\";\n    else if (rating >= 50)\n        return \"Fair\";\n    else\n        return \"Poor\";\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute at UI render time and are cached per record until the record changes or datasource refreshes",
+        "Edit methods can both get and set values, enabling complex validation and business logic during user input",
+        "Methods must be decorated with [Display] or [Edit] attributes and follow naming conventions (display*/edit*)",
+        "Database operations in display methods can cause performance issues—use exists joins and caching strategies",
+        "Cross-company operations require changecompany() blocks and careful consideration of data area context"
+      ],
+      "gotchas": [
+        "Display methods called from query contexts don't have access to form datasource methods like dataSource(), causing null reference exceptions—always check if(this.dataSource()) before calling datasource methods",
+        "Recursive display method calls can occur when display methods trigger form refreshes that call other display methods—use static flags or caching to prevent infinite loops",
+        "Display methods on large record sets (reports, exports) execute for every record—avoid individual database lookups and use temporary tables or joins instead for bulk operations"
+      ],
+      "performance_tips": [
+        "Use exists joins instead of select statements when you only need to check for record existence in display methods",
+        "Implement static caching maps for expensive calculations that don't change frequently, and provide cache clearing mechanisms for data updates"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_select",
+        "xpp_classes"
+      ],
+      "quiz": [
+        {
+          "q": "When is a display method's cached result invalidated?",
+          "options": [
+            "When the form is closed",
+            "When the record buffer changes or datasource refreshes",
+            "Every 60 seconds automatically",
+            "Only when explicitly cleared by code"
+          ],
+          "answer": 1,
+          "explanation": "Display method results are cached per record and invalidated when the record buffer changes (field updates, navigation) or when the datasource refresh() method is called. This prevents redundant calculations while ensuring data consistency."
+        },
+        {
+          "q": "What happens if you call this.dataSource() from a display method executed in a query context?",
+          "options": [
+            "It returns the query's datasource",
+            "It throws a null reference exception",
+            "It returns the main form's datasource",
+            "It creates a new datasource automatically"
+          ],
+          "answer": 1,
+          "explanation": "When display methods are called from queries (reports, exports, SysTableBrowser), they don't have a form datasource context, so this.dataSource() returns null and attempting to call methods on it throws exceptions. Always check if(this.dataSource()) before using datasource methods."
+        },
+        {
+          "q": "Which attribute is required for the kernel to recognize a calculated field method?",
+          "options": [
+            "[Calculated]",
+            "[Display] or [Edit]",
+            "[Method]",
+            "[Field]"
+          ],
+          "answer": 1,
+          "explanation": "[Display] and [Edit] attributes are required for the kernel to automatically recognize and execute these methods as calculated fields. The attributes enable integration with forms, queries, and reports without manual binding."
+        }
+      ]
+    },
+    "generated_date": "2026-05-16",
+    "auto_generated": true
   }
 ]

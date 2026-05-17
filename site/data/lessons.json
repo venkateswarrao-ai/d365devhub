@@ -6606,5 +6606,102 @@
     },
     "generated_date": "2026-05-16",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "data-binding",
+      "ui-logic"
+    ],
+    "summary": "Master display and edit methods for dynamic UI behavior, calculated fields, and form-based data presentation in D365 F&O.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ features that enable dynamic field behavior on forms and reports. Display methods calculate and show values that aren't stored in the database, while edit methods validate and process user input for virtual fields. These methods execute on-demand when forms refresh or users interact with fields, making them essential for business logic that must appear seamlessly integrated with standard table fields.\n\nIn D365 F&O, display/edit methods are commonly used for calculated totals, status indicators, formatted displays, and complex validation scenarios. They're particularly powerful because they integrate naturally with the form binding framework, appearing as regular fields to users while executing custom business logic behind the scenes. Understanding their lifecycle, performance implications, and proper implementation patterns is crucial for creating responsive, maintainable forms.",
+      "theory": "Display and edit methods in D365 F&O leverage the kernel's form binding framework and method dispatch system. When a form datasource binds to a table or class, the kernel automatically discovers methods decorated with [Display] or [Edit] attributes (or legacy display/edit keywords). These methods become virtual fields in the datasource, participating in the standard form refresh cycle.\n\nThe kernel calls display methods during form refresh operations, passing the current record context. Display methods must be static for table-level implementation or instance methods for class-based datasources. The method signature determines binding behavior: methods accepting a table buffer parameter bind to specific record contexts, while parameterless methods bind to the current datasource record. Edit methods follow similar patterns but handle bidirectional data flow, processing both display and user input validation. The SysFormRun and FormDataSource classes manage the method invocation lifecycle, integrating with the broader form event model through methods like validateField() and modified().",
+      "code_examples": [
+        {
+          "title": "Table-level Display Method with Calculation",
+          "description": "Demonstrates a display method on CustTable calculating total sales amount with proper error handling and performance considerations",
+          "language": "xpp",
+          "code": "[Display]\nstatic display AmountMST totalSalesAmount(CustTable _custTable)\n{\n    AmountMST totalAmount;\n    CustTrans custTrans;\n    \n    if (!_custTable.AccountNum)\n        return 0;\n    \n    try\n    {\n        select sum(AmountMST) from custTrans\n            where custTrans.AccountNum == _custTable.AccountNum\n               && custTrans.TransType == CustTransType::Sales;\n        \n        totalAmount = custTrans.AmountMST;\n    }\n    catch (Exception::Error)\n    {\n        error(\"Error calculating total sales for customer %1\", _custTable.AccountNum);\n        totalAmount = 0;\n    }\n    \n    return totalAmount;\n}\n\n[Display]\nstatic display str customerStatusDisplay(CustTable _custTable)\n{\n    str statusText;\n    \n    switch (_custTable.Blocked)\n    {\n        case CustVendorBlocked::No:\n            statusText = \"Active\";\n            break;\n        case CustVendorBlocked::Invoice:\n            statusText = \"Invoice Blocked\";\n            break;\n        case CustVendorBlocked::All:\n            statusText = \"Fully Blocked\";\n            break;\n        default:\n            statusText = \"Unknown\";\n    }\n    \n    return statusText;\n}"
+        },
+        {
+          "title": "Class-based Edit Method with Validation",
+          "description": "Shows an edit method on a custom class handling user input validation and data processing for virtual fields",
+          "language": "xpp",
+          "code": "class SalesOrderProcessor\n{\n    SalesTable salesTable;\n    AmountMST calculatedDiscount;\n    \n    public void new(SalesId _salesId)\n    {\n        salesTable = SalesTable::find(_salesId);\n    }\n    \n    [Edit]\n    public edit AmountMST discountAmount(boolean _set = false, AmountMST _discountAmount = 0)\n    {\n        if (_set)\n        {\n            if (_discountAmount < 0)\n            {\n                throw error(\"Discount amount cannot be negative\");\n            }\n            \n            if (_discountAmount > salesTable.SalesBalance * 0.5)\n            {\n                throw error(\"Discount cannot exceed 50% of order total\");\n            }\n            \n            calculatedDiscount = _discountAmount;\n            this.updateOrderTotals();\n        }\n        \n        return calculatedDiscount;\n    }\n    \n    [Display]\n    public display AmountMST projectedTotal()\n    {\n        return salesTable.SalesBalance - calculatedDiscount;\n    }\n    \n    private void updateOrderTotals()\n    {\n        ttsbegin;\n        try\n        {\n            salesTable.selectForUpdate(true);\n            // Custom field to store calculated discount\n            salesTable.CalculatedDiscount = calculatedDiscount;\n            salesTable.update();\n            ttscommit;\n            \n            info(\"Order totals updated successfully\");\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            throw error(\"Failed to update order totals\");\n        }\n    }\n}"
+        },
+        {
+          "title": "Advanced Display Method with Cross-Company Logic",
+          "description": "Complex display method demonstrating cross-company queries and caching for performance optimization",
+          "language": "xpp",
+          "code": "class VendorAnalysis\n{\n    private Map companyTotalCache;\n    \n    public void new()\n    {\n        companyTotalCache = new Map(Types::String, Types::Real);\n    }\n    \n    [Display]\n    static display AmountMST vendorTotalAllCompanies(VendTable _vendTable)\n    {\n        VendTrans vendTrans;\n        AmountMST totalAmount;\n        container companies;\n        int i;\n        str currentCompany;\n        VendorAnalysis analysis = new VendorAnalysis();\n        \n        if (!_vendTable.AccountNum)\n            return 0;\n            \n        // Get list of companies where vendor exists\n        companies = analysis.getVendorCompanies(_vendTable.AccountNum);\n        \n        for (i = 1; i <= conLen(companies); i++)\n        {\n            currentCompany = conPeek(companies, i);\n            \n            // Check cache first\n            if (analysis.companyTotalCache.exists(currentCompany + _vendTable.AccountNum))\n            {\n                totalAmount += analysis.companyTotalCache.lookup(currentCompany + _vendTable.AccountNum);\n                continue;\n            }\n            \n            changecompany(currentCompany)\n            {\n                AmountMST companyTotal;\n                \n                select sum(AmountMST) from vendTrans\n                    where vendTrans.AccountNum == _vendTable.AccountNum;\n                \n                companyTotal = vendTrans.AmountMST;\n                totalAmount += companyTotal;\n                \n                // Cache the result\n                analysis.companyTotalCache.insert(currentCompany + _vendTable.AccountNum, companyTotal);\n            }\n        }\n        \n        return totalAmount;\n    }\n    \n    private container getVendorCompanies(VendAccount _vendAccount)\n    {\n        VendTable vendTable;\n        container companies = connull();\n        \n        while select crosscompany : [\"*\"] DataAreaId from vendTable\n            where vendTable.AccountNum == _vendAccount\n        {\n            companies = conIns(companies, conLen(companies) + 1, vendTable.DataAreaId);\n        }\n        \n        return companies;\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute during form refresh cycles and should be optimized for performance — avoid complex queries or calculations in frequently-called display methods",
+        "Edit methods handle both display (_set = false) and validation/storage (_set = true) operations, making them bidirectional unlike display methods",
+        "Table-level display/edit methods must be static and accept the table buffer as parameter, while class-based methods are instance methods with direct field access",
+        "Display methods cannot modify data or have side effects — they should be pure functions that calculate and return values based on current record state",
+        "Use caching strategies for expensive calculations in display methods, but ensure cache invalidation aligns with data modification patterns to prevent stale data display"
+      ],
+      "gotchas": [
+        "Avoid database operations in display methods without caching — they execute on every form refresh and can cause severe performance issues with large datasets or complex joins",
+        "Display method return types must match the bound form control's extended data type — mismatched types cause binding failures and display errors",
+        "Never throw exceptions in display methods without proper error handling — unhandled exceptions break form refresh cycles and can make forms unusable until restart"
+      ],
+      "performance_tips": [
+        "Implement display method caching using static Map variables or SysGlobalCache class for expensive calculations, with proper cache invalidation on record modifications",
+        "Use display methods sparingly on list pages and large grids — consider calculated fields or summary tables for frequently-accessed computed values"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_datasources",
+        "xpp_binding"
+      ],
+      "quiz": [
+        {
+          "q": "What happens when a display method throws an unhandled exception?",
+          "options": [
+            "The form control shows an error icon",
+            "The form refresh cycle breaks and may require restart",
+            "The method returns a default value",
+            "The exception is automatically caught by the kernel"
+          ],
+          "answer": 1,
+          "explanation": "Unhandled exceptions in display methods break the form refresh cycle because the kernel cannot complete the binding process. This can render forms unusable until the session is restarted, which is why proper exception handling is critical."
+        },
+        {
+          "q": "How should you handle expensive database operations in display methods?",
+          "options": [
+            "Execute them directly since display methods are cached automatically",
+            "Use caching mechanisms like static Maps or SysGlobalCache",
+            "Avoid them completely and use calculated fields instead",
+            "Execute them in separate threads"
+          ],
+          "answer": 1,
+          "explanation": "Display methods are not automatically cached and execute on every form refresh. Implementing manual caching using static Map variables or SysGlobalCache prevents performance issues while maintaining real-time data display when properly invalidated."
+        },
+        {
+          "q": "What is the key difference between table-level and class-based display methods?",
+          "options": [
+            "Table methods are faster than class methods",
+            "Table methods must be static with buffer parameters, class methods are instance methods",
+            "Class methods cannot access database records",
+            "Table methods cannot return complex types"
+          ],
+          "answer": 1,
+          "explanation": "Table-level display methods must be static and accept the table buffer as a parameter for record context, while class-based display methods are instance methods that can directly access class fields and properties. This design difference affects how the kernel binds and invokes the methods."
+        }
+      ]
+    },
+    "generated_date": "2026-05-17",
+    "auto_generated": true
   }
 ]

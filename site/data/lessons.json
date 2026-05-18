@@ -6703,5 +6703,102 @@
     },
     "generated_date": "2026-05-17",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "xpp",
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "ui"
+    ],
+    "summary": "Learn how to create computed fields, enable UI interactions, and extend forms using display and edit methods in D365 F&O.",
+    "content": {
+      "overview": "Display and edit methods are fundamental mechanisms in D365 F&O for creating computed fields and enabling interactive UI elements that aren't directly bound to database columns. Display methods provide read-only calculated values that appear in forms, reports, and queries, while edit methods create editable fields that can trigger business logic and data validation. These methods are essential for extending standard forms, creating custom UI behaviors, and implementing complex business rules without modifying underlying table structures. Understanding their lifecycle, caching behavior, and performance implications is crucial for building responsive, maintainable applications in the modern D365 F&O stack.",
+      "theory": "Display and edit methods operate within the MVC pattern of D365 F&O forms, where they serve as computed properties of data sources. When bound to form controls, these methods execute during form refresh cycles, with the kernel managing their invocation based on field dependencies and caching strategies. Display methods must return a value and are marked with the [SysClientCacheDataMethodAttribute] for client-side caching optimization. Edit methods require both a return value and a parameter for the new value, enabling bidirectional data flow. The form datasource's active() method triggers recalculation, but methods can also be explicitly refreshed using element.redraw() or datasource_ds.research(). The AOT stores method metadata including return types, parameters, and cache settings, which the kernel uses for type validation and performance optimization. Modern best practices favor using calculated fields on tables or extending through Chain of Command rather than adding display methods directly to standard tables.",
+      "code_examples": [
+        {
+          "title": "Basic Display Method with Caching",
+          "description": "Shows how to create a display method that calculates customer credit limit utilization with proper caching attributes",
+          "language": "xpp",
+          "code": "// On CustTable table\n[SysClientCacheDataMethodAttribute(true)]\npublic display AmountMST creditUtilizationPct()\n{\n    AmountMST creditLimit, usedCredit;\n    Real utilizationPct;\n    CustTrans custTrans;\n    \n    creditLimit = this.CreditMax;\n    \n    if (creditLimit == 0)\n        return 0;\n    \n    // Calculate used credit from open transactions\n    select sum(AmountCur) from custTrans\n        where custTrans.AccountNum == this.AccountNum\n        && custTrans.TransType != CustTransType::Payment\n        && !custTrans.Closed;\n    \n    usedCredit = custTrans.AmountCur;\n    utilizationPct = (usedCredit / creditLimit) * 100;\n    \n    return utilizationPct;\n}\n\n// Usage in form datasource\npublic void active()\n{\n    super();\n    // Method will be called automatically for bound controls\n    // Force refresh if needed:\n    // this.object(fieldNum(CustTable, creditUtilizationPct)).redraw();\n}"
+        },
+        {
+          "title": "Edit Method with Validation and Business Logic",
+          "description": "Demonstrates an edit method that allows interactive editing of calculated values with proper validation and data persistence",
+          "language": "xpp",
+          "code": "// On SalesLine table - edit method for discount percentage\npublic edit Percent lineDiscountPct(boolean _set = false, Percent _discountPct = 0)\n{\n    Percent currentDiscountPct;\n    AmountCur newLineAmount;\n    \n    if (_set)\n    {\n        // Validation\n        if (_discountPct < 0 || _discountPct > 100)\n        {\n            throw error(\"Discount percentage must be between 0 and 100\");\n        }\n        \n        if (_discountPct > 50 && !SalesParameters::find().AllowHighDiscount)\n        {\n            throw error(\"Discount exceeds maximum allowed percentage\");\n        }\n        \n        ttsbegin;\n        try\n        {\n            // Calculate new amounts\n            newLineAmount = this.SalesPrice * this.SalesQty * (1 - (_discountPct / 100));\n            \n            // Update related fields\n            this.LinePercent = _discountPct;\n            this.LineAmount = newLineAmount;\n            this.modifiedField(fieldNum(SalesLine, LinePercent));\n            this.modifiedField(fieldNum(SalesLine, LineAmount));\n            \n            // Trigger recalculation of totals\n            this.salesTable().updateTotals();\n            \n            ttscommit;\n            \n            info(strFmt(\"Discount updated to %1%\", _discountPct));\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            throw;\n        }\n    }\n    \n    // Return current value\n    currentDiscountPct = this.SalesPrice != 0 ? \n        ((this.SalesPrice - (this.LineAmount / this.SalesQty)) / this.SalesPrice) * 100 : 0;\n    \n    return currentDiscountPct;\n}"
+        },
+        {
+          "title": "Advanced Display Method with Multi-Table Joins",
+          "description": "Complex display method that performs joins across multiple tables with optimized queries and error handling",
+          "language": "xpp",
+          "code": "// On InventTable - display last purchase info with vendor details\n[SysClientCacheDataMethodAttribute(true)]\npublic display str lastPurchaseInfo()\n{\n    PurchLine purchLine;\n    PurchTable purchTable;\n    VendTable vendTable;\n    str purchaseInfo;\n    TransDateTime lastPurchDate;\n    \n    try\n    {\n        // Optimized query with proper joins\n        select firstonly purchLine\n        order by purchLine.CreatedDateTime desc\n            join purchTable\n                where purchTable.PurchId == purchLine.PurchId\n            join vendTable\n                where vendTable.AccountNum == purchTable.OrderAccount\n            where purchLine.ItemId == this.ItemId\n                && purchTable.PurchStatus != PurchStatus::Cancelled;\n        \n        if (purchLine.RecId)\n        {\n            lastPurchDate = purchLine.CreatedDateTime;\n            purchaseInfo = strFmt(\"Last: %1 from %2 (%3)\",\n                DateTimeUtil::toStr(lastPurchDate),\n                vendTable.name(),\n                purchTable.PurchId);\n        }\n        else\n        {\n            purchaseInfo = \"No purchase history\";\n        }\n    }\n    catch (Exception::Error)\n    {\n        purchaseInfo = \"Error retrieving data\";\n        error(\"Failed to retrieve purchase history for item: \" + this.ItemId);\n    }\n    \n    return purchaseInfo;\n}\n\n// Form method to refresh display method when needed\npublic void refreshPurchaseInfo()\n{\n    InventTable_ds.object(fieldNum(InventTable, lastPurchaseInfo)).redraw();\n    \n    // Alternative: refresh entire record\n    // InventTable_ds.research();\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods create computed read-only fields that execute during form refresh cycles and should use [SysClientCacheDataMethodAttribute(true)] for performance optimization",
+        "Edit methods enable bidirectional data flow with validation logic, requiring both getter and setter functionality in a single method signature",
+        "Method execution is triggered by datasource.active(), form refreshes, or explicit calls to redraw() or research() on the bound control or datasource",
+        "Caching behavior differs between client and server execution — cached methods reduce database round trips but may show stale data until refresh",
+        "Performance optimization requires minimizing database queries within methods, using firstonly selects, and avoiding complex joins in frequently-called display methods"
+      ],
+      "gotchas": [
+        "Never perform DML operations (insert/update/delete) in display methods — they're meant for read-only calculations and violate the method contract, causing unpredictable form behavior",
+        "Edit method validation exceptions during _set operations can leave forms in inconsistent states — always use ttsbegin/ttscommit blocks and proper exception handling to maintain data integrity",
+        "Cached display methods won't refresh automatically when underlying data changes — you must explicitly call redraw() or research() to force recalculation, or the UI will show outdated values"
+      ],
+      "performance_tips": [
+        "Use [SysClientCacheDataMethodAttribute(true)] on display methods that perform expensive calculations or database queries to enable client-side caching and reduce server round trips",
+        "Minimize database operations within display methods by pre-loading related data in form datasource init() methods or using display method optimization techniques like temp table caching for bulk operations"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_tables",
+        "xpp_caching"
+      ],
+      "quiz": [
+        {
+          "q": "What is the correct signature for an edit method that handles a Percent field?",
+          "options": [
+            "public Percent editDiscount(Percent _value)",
+            "public edit Percent discount(boolean _set = false, Percent _value = 0)",
+            "public display edit Percent discount(Percent _newValue)",
+            "public void setDiscount(Percent _value) / public Percent getDiscount()"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods require the 'edit' keyword, a boolean _set parameter to distinguish get/set operations, and a value parameter with default value. This single method handles both getting current value and setting new value based on the _set flag."
+        },
+        {
+          "q": "When should you use [SysClientCacheDataMethodAttribute(true)] on a display method?",
+          "options": [
+            "Always, on every display method for best performance",
+            "Never, caching causes data consistency issues",
+            "Only when the method performs expensive operations and the data doesn't change frequently",
+            "Only for edit methods, not display methods"
+          ],
+          "answer": 2,
+          "explanation": "Client-side caching should be used selectively for display methods that perform expensive calculations or database queries where the underlying data doesn't change frequently. Overuse can cause stale data issues, while appropriate use significantly improves form performance."
+        },
+        {
+          "q": "What happens if you perform a database insert operation inside a display method?",
+          "options": [
+            "The insert executes normally but may cause performance issues",
+            "The system throws a compilation error preventing the operation",
+            "It violates the display method contract and causes unpredictable form behavior including potential infinite loops",
+            "The insert is automatically wrapped in a transaction for safety"
+          ],
+          "answer": 2,
+          "explanation": "Display methods are designed for read-only operations and executing DML operations violates their contract. This can cause infinite refresh loops, form instability, and unpredictable behavior as the form tries to refresh the display method repeatedly."
+        }
+      ]
+    },
+    "generated_date": "2026-05-18",
+    "auto_generated": true
   }
 ]

@@ -6800,5 +6800,101 @@
     },
     "generated_date": "2026-05-18",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "ui-layer",
+      "calculated-fields"
+    ],
+    "summary": "Master display and edit methods for computed fields, UI logic, and data transformations in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable computed fields and UI-driven data manipulation in D365 F&O. Display methods provide read-only calculated values that appear seamlessly alongside database fields in forms, grids, and reports, while edit methods allow users to input values that trigger business logic without persisting directly to tables. These methods bridge the gap between raw data and meaningful business information, enabling everything from simple concatenations to complex financial calculations. Understanding their lifecycle, caching behavior, and integration with the kernel is crucial for creating performant, maintainable solutions that feel native to the D365 user experience.",
+      "theory": "Display and edit methods leverage D365's metadata-driven architecture to extend table and form data sources without modifying underlying table structures. The kernel automatically detects methods with 'display' and 'edit' modifiers during form compilation, registering them for runtime invocation. Display methods execute during record retrieval and form refresh cycles, with results cached per record until the data source refreshes. Edit methods integrate with the form's field binding system, allowing temporary value storage and validation before triggering business logic through the modified() event. Both method types participate in the same security framework as regular fields, honoring field-level security and display menu item permissions. The FormDataSource framework manages their lifecycle, ensuring proper execution order relative to field events, data source events, and cross-table dependencies. Advanced scenarios involve method chaining, where display methods call other display methods, and integration with Reporting Services through the SrsReportDataContract framework.",
+      "code_examples": [
+        {
+          "title": "Table Display Method with Complex Calculation",
+          "description": "A display method on CustTable that calculates customer credit utilization percentage with error handling",
+          "language": "xpp",
+          "code": "// CustTable table - display method\ndisplay CreditUtilizationPct creditUtilization()\n{\n    CreditUtilizationPct utilization = 0.0;\n    CustTrans custTrans;\n    AmountMST totalOutstanding = 0.0;\n    CreditMax creditLimit;\n    \n    try\n    {\n        creditLimit = this.CreditMax;\n        \n        if (creditLimit <= 0)\n        {\n            return utilization;\n        }\n        \n        // Calculate outstanding balance\n        select sum(AmountMST) from custTrans\n            where custTrans.AccountNum == this.AccountNum\n               && custTrans.AmountMST > 0;\n               \n        totalOutstanding = custTrans.AmountMST;\n        \n        if (totalOutstanding > 0)\n        {\n            utilization = (totalOutstanding / creditLimit) * 100;\n        }\n    }\n    catch (Exception::Error)\n    {\n        error(\"Error calculating credit utilization for customer: \" + this.AccountNum);\n    }\n    \n    return utilization;\n}"
+        },
+        {
+          "title": "Form Edit Method with Business Logic",
+          "description": "An edit method on a form data source that validates and processes discount percentage input",
+          "language": "xpp",
+          "code": "// SalesTable form data source - edit method\nedit DiscPct discountPercentEdit(boolean _set, DiscPct _discPct)\n{\n    SalesLine salesLine;\n    AmountCur maxAllowedDisc;\n    \n    if (_set)\n    {\n        // Validate discount percentage\n        if (_discPct < 0 || _discPct > 100)\n        {\n            error(\"Discount percentage must be between 0 and 100\");\n            return this.DiscPct;\n        }\n        \n        // Check user authorization for discount levels\n        maxAllowedDisc = UserDiscountAuthorization::maxDiscountPct(\n            curUserId(), \n            this.CustAccount);\n            \n        if (_discPct > maxAllowedDisc)\n        {\n            warning(strFmt(\"Discount %1%% exceeds your authorization limit of %2%%\",\n                          _discPct, maxAllowedDisc));\n            return this.DiscPct;\n        }\n        \n        ttsbegin;\n        \n        // Update header discount\n        this.DiscPct = _discPct;\n        \n        // Cascade to sales lines if requested\n        if (Box::yesNo(\"Apply discount to all lines?\", DialogButton::No) == DialogButton::Yes)\n        {\n            update_recordset salesLine\n                setting DiscPct = _discPct * 0.8  // Reduce line discount slightly\n                where salesLine.SalesId == this.SalesId\n                   && salesLine.SalesStatus == SalesStatus::Backorder;\n        }\n        \n        ttscommit;\n        \n        info(strFmt(\"Discount updated to %1%% for sales order %2\", \n                   _discPct, this.SalesId));\n    }\n    \n    return this.DiscPct;\n}"
+        },
+        {
+          "title": "Cross-Company Display Method with Caching",
+          "description": "A display method that aggregates data across companies with manual caching for performance",
+          "language": "xpp",
+          "code": "// VendTable table - display method with caching\nprivate static Map vendorGlobalOrdersCache;\n\ndisplay Counter globalOrderCount()\n{\n    Counter orderCount = 0;\n    PurchTable purchTable;\n    str cacheKey;\n    \n    // Initialize static cache\n    if (!VendTable::vendorGlobalOrdersCache)\n    {\n        VendTable::vendorGlobalOrdersCache = new Map(Types::String, Types::Integer);\n    }\n    \n    cacheKey = this.AccountNum + \"_\" + date2Str(systemDateGet(), 321, 2, -1, 2, -1, 4);\n    \n    // Check cache first\n    if (VendTable::vendorGlobalOrdersCache.exists(cacheKey))\n    {\n        return VendTable::vendorGlobalOrdersCache.lookup(cacheKey);\n    }\n    \n    try\n    {\n        // Cross-company aggregation\n        changecompany('USMF')\n        {\n            select count(RecId) from purchTable\n                where purchTable.OrderAccount == this.AccountNum\n                   && purchTable.PurchStatus != PurchStatus::Cancelled;\n            orderCount += purchTable.RecId;\n        }\n        \n        changecompany('DEMF')\n        {\n            select count(RecId) from purchTable\n                where purchTable.OrderAccount == this.AccountNum\n                   && purchTable.PurchStatus != PurchStatus::Cancelled;\n            orderCount += purchTable.RecId;\n        }\n        \n        // Cache the result for 1 hour\n        VendTable::vendorGlobalOrdersCache.insert(cacheKey, orderCount);\n        \n        // Clean old cache entries (simple cleanup)\n        if (VendTable::vendorGlobalOrdersCache.elements() > 1000)\n        {\n            VendTable::vendorGlobalOrdersCache = new Map(Types::String, Types::Integer);\n        }\n    }\n    catch (Exception::Error)\n    {\n        warning(\"Unable to retrieve global order count for vendor: \" + this.AccountNum);\n    }\n    \n    return orderCount;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute automatically during form data source refresh and are cached per record until the next refresh cycle",
+        "Edit methods require both _set parameter handling and return value management to integrate properly with form field binding",
+        "Use the 'display' and 'edit' method modifiers — they're not just naming conventions but kernel directives for method registration",
+        "Display methods on tables are inherited by all forms using that table, while form-level methods only apply to that specific form instance",
+        "Method parameters must match expected signatures: display methods take no parameters (except for container displays), edit methods require boolean _set and value parameters"
+      ],
+      "gotchas": [
+        "Display methods that perform database queries without proper optimization can cause severe performance issues in grids with many records — always consider select statement efficiency and caching strategies",
+        "Edit methods that don't properly handle the _set parameter boolean logic will break form field binding, causing values to not persist or display incorrectly when users tab between fields",
+        "Using ttsbegin/ttscommit inside display methods creates transaction scope issues and can lead to deadlocks — display methods should be read-only with minimal business logic"
+      ],
+      "performance_tips": [
+        "Implement manual caching in display methods that perform expensive calculations or cross-company queries, using static variables or the Global class for session-level caching",
+        "Use exists joins instead of select count() in display methods when you only need to verify record existence, and consider moving complex calculations to batch jobs with cached results"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_select",
+        "form_data_sources"
+      ],
+      "quiz": [
+        {
+          "q": "When does a display method execute in the form lifecycle?",
+          "options": [
+            "Only when the form opens",
+            "During data source refresh and when records become active",
+            "Continuously every few seconds",
+            "Only when explicitly called by user code"
+          ],
+          "answer": 1,
+          "explanation": "Display methods execute during form data source refresh cycles and when records become the active record in a grid or form. The kernel caches results per record until the next refresh, making them efficient for UI display while ensuring data consistency."
+        },
+        {
+          "q": "What is the correct signature for an edit method that handles a real number value?",
+          "options": [
+            "edit real myMethod(real _value)",
+            "edit real myMethod(boolean _set, real _value)",
+            "display edit real myMethod(real _value)",
+            "edit real myMethod(boolean _set)"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods require a boolean _set parameter to determine if the method is being called to set a value (true) or get the current value (false), followed by the value parameter of the appropriate type."
+        },
+        {
+          "q": "Which approach provides the best performance for display methods that need database access?",
+          "options": [
+            "Use complex joins in a single select statement",
+            "Implement caching with static variables or Global class",
+            "Call the method multiple times to ensure fresh data",
+            "Use ttsbegin/ttscommit to ensure data consistency"
+          ],
+          "answer": 1,
+          "explanation": "Implementing caching with static variables or the Global class prevents repeated database calls for the same calculated values within a user session. This is especially important for display methods shown in grids where the method executes once per visible record."
+        }
+      ]
+    },
+    "generated_date": "2026-05-19",
+    "auto_generated": true
   }
 ]

@@ -1,5 +1,13 @@
 [
   {
+    "date": "May 19",
+    "tag": "LESSON",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "id": "xpp_display_methods"
+  },
+  {
     "date": "May 18",
     "tag": "LESSON",
     "title": "Display & Edit Methods in X++",
@@ -230,13 +238,5 @@
     "section": "Integrations",
     "level": "Expert",
     "id": "int_webhooks"
-  },
-  {
-    "date": "Apr 18",
-    "tag": "LESSON",
-    "title": "Azure Data Lake Export (BYOD/FnO)",
-    "section": "Integrations",
-    "level": "Expert",
-    "id": "int_azure_data_lake"
   }
 ]

@@ -6896,5 +6896,102 @@
     },
     "generated_date": "2026-05-19",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "computed-fields",
+      "ui-extensions"
+    ],
+    "summary": "Master display and edit methods for creating computed fields, implementing complex business logic in forms, and building maintainable UI extensions in D365 F&O.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable you to create computed fields and implement complex UI behavior in D365 F&O forms. Display methods calculate and present data without storing it in the database, while edit methods allow users to input values that trigger custom business logic. These methods are essential for extending standard forms, creating custom views of data, and implementing sophisticated user interactions without modifying base tables. Understanding their lifecycle, performance characteristics, and integration with the form framework is crucial for building scalable, maintainable solutions that follow Microsoft's extension patterns.",
+      "theory": "Display and edit methods execute within the form's data source context and are automatically called by the kernel during form rendering and user interactions. Display methods are invoked during form refresh, record navigation, and field updates, making them ideal for calculations, lookups, and data formatting. Edit methods handle user input validation and can trigger cascading updates to related fields. The kernel caches display method results per record to optimize performance, but this caching behavior varies based on method placement (table vs. form datasource) and data source type (Table, Query, View). Methods defined on table classes are globally available across all forms using that table, while form datasource methods provide form-specific behavior. The SysTableBrowser framework and form pattern guidelines heavily influence how these methods integrate with standard D365 forms, particularly in list pages and detail forms where consistent user experience is critical.",
+      "code_examples": [
+        {
+          "title": "Display Method for Customer Credit Status",
+          "description": "A comprehensive display method that calculates customer credit status with proper error handling and caching considerations",
+          "language": "xpp",
+          "code": "[SysClientCacheDataMethodAttribute(true)]\ndisplay CustCreditStatus creditStatusDisplay()\n{\n    CustCreditStatus creditStatus = CustCreditStatus::Good;\n    CustTable custTable = this as CustTable;\n    \n    if (!custTable.AccountNum)\n    {\n        return CustCreditStatus::Unknown;\n    }\n    \n    try\n    {\n        // Get credit limit and current balance\n        AmountCur creditLimit = CustTable::find(custTable.AccountNum).CreditMax;\n        AmountCur currentBalance = CustTrans::balance(custTable.AccountNum);\n        \n        if (creditLimit > 0)\n        {\n            real utilizationPercent = (currentBalance / creditLimit) * 100;\n            \n            if (utilizationPercent >= 100)\n            {\n                creditStatus = CustCreditStatus::Blocked;\n            }\n            else if (utilizationPercent >= 80)\n            {\n                creditStatus = CustCreditStatus::Warning;\n            }\n            else if (utilizationPercent >= 60)\n            {\n                creditStatus = CustCreditStatus::Caution;\n            }\n        }\n        else if (currentBalance > 0)\n        {\n            creditStatus = CustCreditStatus::Warning;\n        }\n    }\n    catch (Exception::Error)\n    {\n        creditStatus = CustCreditStatus::Unknown;\n        warning(\"Unable to calculate credit status for customer \" + custTable.AccountNum);\n    }\n    \n    return creditStatus;\n}"
+        },
+        {
+          "title": "Edit Method for Dynamic Price Calculation",
+          "description": "An edit method that handles price input with validation, currency conversion, and automatic discount application",
+          "language": "xpp",
+          "code": "edit SalesPrice unitPriceEdit(boolean _set = false, SalesPrice _unitPrice = 0)\n{\n    SalesLine salesLine = this as SalesLine;\n    \n    if (_set)\n    {\n        ttsbegin;\n        try\n        {\n            // Validate price is not negative\n            if (_unitPrice < 0)\n            {\n                throw error(\"Unit price cannot be negative\");\n            }\n            \n            // Check if manual price override is allowed\n            if (salesLine.PriceSource == PriceSource::Agreement && !this.allowPriceOverride())\n            {\n                throw error(\"Price override not allowed for trade agreement items\");\n            }\n            \n            // Store original values for rollback if needed\n            SalesPrice originalPrice = salesLine.SalesPrice;\n            LineAmount originalAmount = salesLine.LineAmount;\n            \n            // Set the new price\n            salesLine.SalesPrice = _unitPrice;\n            salesLine.PriceSource = PriceSource::Manual;\n            \n            // Recalculate line amount and discounts\n            salesLine.calcLineAmount();\n            this.calculateTradeDiscounts();\n            \n            // Validate total doesn't exceed order limits\n            if (salesLine.LineAmount > salesLine.salesTable().MaxRetailOrderTotal && \n                salesLine.salesTable().MaxRetailOrderTotal > 0)\n            {\n                salesLine.SalesPrice = originalPrice;\n                salesLine.LineAmount = originalAmount;\n                throw error(strFmt(\"Line amount %1 exceeds maximum order total %2\", \n                                   num2Str(salesLine.LineAmount, -1, 2, -1, -1),\n                                   num2Str(salesLine.salesTable().MaxRetailOrderTotal, -1, 2, -1, -1)));\n            }\n            \n            // Log price change for audit trail\n            this.logPriceChange(originalPrice, _unitPrice, \"Manual price override\");\n            \n            ttscommit;\n            \n            // Refresh form to show updated calculations\n            this.formRun().dataSource().research();\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            throw;\n        }\n    }\n    \n    return salesLine.SalesPrice;\n}\n\nprivate boolean allowPriceOverride()\n{\n    return SalesParameters::find().AllowPriceOverride && \n           this.salesTable().SalesType != SalesType::Subscription;\n}\n\nprivate void calculateTradeDiscounts()\n{\n    SalesLine salesLine = this as SalesLine;\n    TradeDisc::findDisc(salesLine.salesTable(), salesLine);\n}\n\nprivate void logPriceChange(SalesPrice _oldPrice, SalesPrice _newPrice, str _reason)\n{\n    // Implementation for audit logging\n    info(strFmt(\"Price changed from %1 to %2. Reason: %3\", \n                num2Str(_oldPrice, -1, 2, -1, -1),\n                num2Str(_newPrice, -1, 2, -1, -1),\n                _reason));\n}"
+        },
+        {
+          "title": "Conditional Display Method with Form Context",
+          "description": "A form datasource display method that shows different values based on form state and user permissions",
+          "language": "xpp",
+          "code": "// On SalesTable form datasource\ndisplay str approvalStatusDisplay()\n{\n    SalesTable salesTable = this.cursor();\n    FormRun formRun = this.formRun();\n    str statusDisplay;\n    \n    if (!salesTable.RecId)\n    {\n        return \"\";\n    }\n    \n    try\n    {\n        // Check user permissions for detailed status\n        if (SecurityRights::hasMenuItemAccess(menuItemActionTypeAction, \n                                              menuItemActionStr(SalesOrderApprovalHistory)))\n        {\n            WorkflowInstanceTable workflowInstance;\n            WorkflowTrackingStatusTable trackingStatus;\n            \n            // Get current workflow status\n            select firstonly Status, ElementName from trackingStatus\n                order by CreatedDateTime desc\n                exists join workflowInstance\n                where workflowInstance.RecId == trackingStatus.WorkflowInstanceRecId &&\n                      workflowInstance.RefTableId == tableNum(SalesTable) &&\n                      workflowInstance.RefRecId == salesTable.RecId;\n            \n            if (trackingStatus.Status)\n            {\n                switch (trackingStatus.Status)\n                {\n                    case WorkflowTrackingStatus::Pending:\n                        statusDisplay = strFmt(\"Pending: %1\", trackingStatus.ElementName);\n                        break;\n                    case WorkflowTrackingStatus::Approved:\n                        statusDisplay = \"Approved\";\n                        break;\n                    case WorkflowTrackingStatus::Rejected:\n                        statusDisplay = \"Rejected\";\n                        break;\n                    case WorkflowTrackingStatus::Cancelled:\n                        statusDisplay = \"Cancelled\";\n                        break;\n                    default:\n                        statusDisplay = enum2Str(trackingStatus.Status);\n                }\n            }\n            else\n            {\n                statusDisplay = salesTable.DocumentStatus == VersioningDocumentStatus::Approved ? \n                               \"Manual Approval\" : \"Not Submitted\";\n            }\n        }\n        else\n        {\n            // Limited view for users without detailed permissions\n            statusDisplay = salesTable.DocumentStatus == VersioningDocumentStatus::Approved ? \n                           \"Approved\" : \"Pending\";\n        }\n        \n        // Add visual indicators based on form mode\n        if (formRun.isFormPartPreviewPane())\n        {\n            // Simplified display for preview pane\n            statusDisplay = subStr(statusDisplay, 1, 15);\n        }\n        \n        // Highlight urgent items in list view\n        if (this.formRun().design().name() == formStr(SalesTableListPage) && \n            salesTable.DeliveryDate < DateTimeUtil::addDays(DateTimeUtil::utcNow(), 2))\n        {\n            statusDisplay = \"⚠ \" + statusDisplay;\n        }\n    }\n    catch (Exception::Error)\n    {\n        statusDisplay = \"Error\";\n        warning(\"Unable to determine approval status for sales order \" + salesTable.SalesId);\n    }\n    \n    return statusDisplay;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute during form refresh cycles and should be optimized for frequent calls — cache expensive calculations using SysClientCacheDataMethodAttribute when appropriate",
+        "Edit methods provide bidirectional data binding and must handle both get and set operations — always validate input parameters and implement proper error handling with ttsbegin/ttscommit",
+        "Methods defined on table classes are globally available across all forms, while form datasource methods provide form-specific behavior and access to form context",
+        "Use FormDataSource.cacheRemoveRecord() to force refresh of display method values when underlying data changes outside normal form operations",
+        "Display and edit methods cannot directly modify database records — use table methods or form event handlers for data persistence operations"
+      ],
+      "gotchas": [
+        "Display methods that perform database queries without proper caching can cause severe performance issues — each grid row triggers method execution, potentially creating N+1 query problems in list forms",
+        "Edit methods must handle the boolean _set parameter correctly — failing to check this parameter can cause infinite recursion or unexpected behavior during form initialization",
+        "Throwing exceptions in display methods breaks form rendering and creates poor user experience — always use try/catch blocks and return default values rather than propagating exceptions"
+      ],
+      "performance_tips": [
+        "Implement SysClientCacheDataMethodAttribute(true) for display methods with expensive calculations that don't change frequently, and use FormDataSource.cacheRemoveRecord() to invalidate when needed",
+        "Batch database operations in edit methods using RecordSortedList or temporary tables when updates affect multiple related records to minimize transaction scope"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_tables",
+        "xpp_caching"
+      ],
+      "quiz": [
+        {
+          "q": "What happens when a display method throws an unhandled exception during form rendering?",
+          "options": [
+            "The form displays a default value for that field",
+            "The entire form fails to render and shows an error page",
+            "Only the affected row in the grid becomes unselectable",
+            "The display method is automatically disabled for the session"
+          ],
+          "answer": 1,
+          "explanation": "When a display method throws an unhandled exception, it breaks the form rendering process and typically results in a complete form failure. This is why proper exception handling with try/catch blocks and default return values is critical in display methods."
+        },
+        {
+          "q": "When should you use SysClientCacheDataMethodAttribute on a display method?",
+          "options": [
+            "Always, to improve performance",
+            "When the method performs expensive calculations that don't change frequently per record",
+            "Only for methods that access external web services",
+            "Never, as it can cause data consistency issues"
+          ],
+          "answer": 1,
+          "explanation": "SysClientCacheDataMethodAttribute should be used when the display method performs expensive operations (like complex calculations or database queries) and the result doesn't change frequently for the same record. Overuse can lead to stale data display."
+        },
+        {
+          "q": "What is the correct way to handle data modification in an edit method?",
+          "options": [
+            "Directly modify table fields within the method",
+            "Use this.update() to persist changes immediately",
+            "Wrap modifications in ttsbegin/ttscommit and validate input parameters",
+            "Call FormDataSource.write() at the end of the method"
+          ],
+          "answer": 2,
+          "explanation": "Edit methods should wrap data modifications in ttsbegin/ttscommit transactions, validate all input parameters, and include proper error handling. Direct field modification without transaction control can lead to data integrity issues."
+        }
+      ]
+    },
+    "generated_date": "2026-05-20",
+    "auto_generated": true
   }
 ]

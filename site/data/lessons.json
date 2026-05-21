@@ -6993,5 +6993,102 @@
     },
     "generated_date": "2026-05-20",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "25 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "calculated-fields",
+      "ui-binding"
+    ],
+    "summary": "Learn how to create display and edit methods in X++ for calculated fields, dynamic UI behavior, and form controls that bind to computed values rather than physical table fields.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable calculated fields and dynamic UI behavior in D365 F&O forms. Display methods compute and return values for read-only scenarios (like concatenated names, calculated totals, or status indicators), while edit methods provide two-way data binding for computed fields that users can modify. These methods bridge the gap between raw table data and meaningful business logic presentation in forms, grids, and reports.\n\nUnlike physical table fields, display/edit methods execute at runtime and can incorporate complex business logic, cross-table lookups, and conditional formatting. They're essential for creating rich user experiences without bloating table schemas with derived data. Understanding their lifecycle, caching behavior, and performance implications is crucial for building responsive D365 applications.\n\nThis lesson covers the technical implementation patterns, AOT integration, form binding mechanics, and performance optimization techniques that separate professional D365 developers from beginners. We'll explore real-world scenarios using standard D365 tables and demonstrate production-grade error handling and caching strategies.",
+      "theory": "Display and edit methods are class methods decorated with [Display] or [Edit] attributes that appear as virtual fields in forms and grids. The kernel treats them as pseudo-fields, automatically calling them during form rendering and data binding operations. The SysTableBrowser framework and form datasource engine invoke these methods through reflection, making them appear seamless to end users.\n\nThe method signature must follow strict conventions: display methods take no parameters and return a value, while edit methods accept both a value parameter (for assignment) and an optional assignment flag. The kernel caches results per record to avoid redundant calculations during grid scrolling or form refreshes. However, this caching can cause stale data issues if the underlying data changes without proper cache invalidation.\n\nIn the AOT, these methods integrate with form controls through the DataMethod property, binding the control's value to the method's return value. The form datasource's research() method triggers recalculation, and the validateWrite() pattern can intercept edit method assignments for validation. The SysSetupFormRun framework and standard form patterns like Details Master rely heavily on this architecture for presenting calculated KPIs and editable computed fields.\n\nPerformance considerations include minimizing database calls within these methods, leveraging temp tables for complex calculations, and understanding when the kernel triggers recalculation. The caching mechanism operates at the cursor level, so changing records or refreshing datasources clears cached values. For expensive calculations, consider implementing manual caching using static variables or the SysGlobalCache framework.",
+      "code_examples": [
+        {
+          "title": "Display Method for Customer Full Name and Credit Status",
+          "description": "Shows a typical display method pattern for concatenating fields and displaying derived status information with proper error handling",
+          "language": "xpp",
+          "code": "/// CustTable table extension with display methods\nfinal class CustTableExtension\n{\n    /// <summary>\n    /// Display customer full name with title\n    /// </summary>\n    [Display]\n    public str customerFullName()\n    {\n        DirPartyTable       party;\n        DirPerson           person;\n        str                 fullName;\n        \n        try\n        {\n            select firstonly person\n                join party\n                where party.RecId == this.Party &&\n                      person.PartyRecId == party.RecId;\n            \n            if (person.RecId)\n            {\n                fullName = strFmt(\"%1 %2 %3\", \n                                person.PersonalTitle ? person.PersonalTitle : '',\n                                person.FirstName ? person.FirstName : '',\n                                person.LastName ? person.LastName : '');\n                fullName = strRTrim(strLTrim(fullName));\n            }\n            else\n            {\n                // Fallback to party name for organizations\n                fullName = DirPartyTable::find(this.Party).Name;\n            }\n        }\n        catch (Exception::Error)\n        {\n            fullName = this.AccountNum; // Fallback to account number\n        }\n        \n        return fullName ? fullName : this.AccountNum;\n    }\n    \n    /// <summary>\n    /// Display credit status with warning indicators\n    /// </summary>\n    [Display]\n    public str creditStatusDisplay()\n    {\n        CustCreditLimit     creditLimit;\n        real                currentBalance;\n        str                 statusText;\n        \n        try\n        {\n            currentBalance = CustTrans::balance(this.AccountNum);\n            creditLimit = CustCreditLimit::find(this.AccountNum);\n            \n            if (creditLimit.CreditMax > 0)\n            {\n                real utilizationPct = (currentBalance / creditLimit.CreditMax) * 100;\n                \n                if (utilizationPct > 100)\n                {\n                    statusText = strFmt(\"⚠️ OVER LIMIT (%1%%)\", decRound(utilizationPct, 1));\n                }\n                else if (utilizationPct > 80)\n                {\n                    statusText = strFmt(\"⚡ HIGH (%1%%)\", decRound(utilizationPct, 1));\n                }\n                else\n                {\n                    statusText = strFmt(\"✓ OK (%1%%)\", decRound(utilizationPct, 1));\n                }\n            }\n            else\n            {\n                statusText = \"No Limit Set\";\n            }\n        }\n        catch (Exception::Error)\n        {\n            statusText = \"Error Calculating\";\n        }\n        \n        return statusText;\n    }\n}"
+        },
+        {
+          "title": "Edit Method with Validation and Business Logic",
+          "description": "Demonstrates an edit method that allows users to modify a calculated discount percentage with proper validation and automatic recalculation of dependent fields",
+          "language": "xpp",
+          "code": "/// SalesLine table extension with edit method for dynamic discount\nfinal class SalesLineExtension\n{\n    real    calculatedDiscountPct;\n    \n    /// <summary>\n    /// Edit method for calculated discount percentage\n    /// </summary>\n    [Edit]\n    public real discountPercentageEdit(boolean _set = false, real _value = 0)\n    {\n        if (_set)\n        {\n            // Validation logic\n            if (_value < 0 || _value > 100)\n            {\n                throw error(\"Discount percentage must be between 0 and 100\");\n            }\n            \n            // Check authorization for high discounts\n            if (_value > 50 && !CustParameters::find().AllowHighDiscount)\n            {\n                throw error(\"Discount over 50% requires special authorization\");\n            }\n            \n            ttsbegin;\n            try\n            {\n                // Store in a custom field or calculate line amount\n                this.calculatedDiscountPct = _value;\n                \n                // Recalculate line amount based on new discount\n                real baseAmount = this.QtyOrdered * this.SalesPrice;\n                this.LineAmount = baseAmount * (1 - (_value / 100));\n                \n                // Update discount amount field\n                this.LineDisc = baseAmount - this.LineAmount;\n                \n                // Mark for recalculation of totals\n                this.SalesTable().modifiedField(fieldNum(SalesTable, SalesBalance));\n                \n                ttscommit;\n                \n                info(strFmt(\"Discount applied: %1%%. Line amount: %2\", \n                           decRound(_value, 2), \n                           num2Str(this.LineAmount, -1, 2, 1, 1)));\n            }\n            catch (Exception::Error)\n            {\n                ttsabort;\n                throw;\n            }\n        }\n        else\n        {\n            // Calculate current discount percentage\n            if (this.SalesPrice > 0 && this.QtyOrdered > 0)\n            {\n                real baseAmount = this.QtyOrdered * this.SalesPrice;\n                if (baseAmount > 0)\n                {\n                    this.calculatedDiscountPct = ((baseAmount - this.LineAmount) / baseAmount) * 100;\n                }\n            }\n        }\n        \n        return this.calculatedDiscountPct;\n    }\n    \n    /// <summary>\n    /// Display method showing profit margin\n    /// </summary>\n    [Display]\n    public real profitMarginPct()\n    {\n        real        costPrice;\n        real        marginPct;\n        InventTable inventTable;\n        \n        try\n        {\n            if (!this.ItemId)\n                return 0;\n                \n            inventTable = InventTable::find(this.ItemId);\n            costPrice = InventCostPrice::costPrice(this.ItemId, \n                                                 this.inventDim(),\n                                                 this.SalesTable().SalesId,\n                                                 this.LineNum);\n            \n            if (costPrice > 0 && this.SalesPrice > 0)\n            {\n                marginPct = ((this.SalesPrice - costPrice) / this.SalesPrice) * 100;\n            }\n        }\n        catch (Exception::Error)\n        {\n            marginPct = 0;\n        }\n        \n        return decRound(marginPct, 2);\n    }\n}"
+        },
+        {
+          "title": "Advanced Display Method with Caching and Performance Optimization",
+          "description": "Shows sophisticated caching techniques and performance optimization for expensive calculations in display methods",
+          "language": "xpp",
+          "code": "/// VendTable extension with optimized display methods\nfinal class VendTableExtension\n{\n    // Static cache for expensive calculations\n    private static Map vendorMetricsCache;\n    private static utcdatetime cacheExpiry;\n    \n    /// <summary>\n    /// Initialize cache if needed\n    /// </summary>\n    private static void initCache()\n    {\n        if (!VendTableExtension::vendorMetricsCache || \n            DateTimeUtil::utcNow() > VendTableExtension::cacheExpiry)\n        {\n            VendTableExtension::vendorMetricsCache = new Map(Types::String, Types::Container);\n            // Cache expires after 5 minutes\n            VendTableExtension::cacheExpiry = DateTimeUtil::addMinutes(DateTimeUtil::utcNow(), 5);\n        }\n    }\n    \n    /// <summary>\n    /// Display vendor performance metrics with caching\n    /// </summary>\n    [Display]\n    public str vendorPerformanceMetrics()\n    {\n        container       metrics;\n        str             cacheKey;\n        str             result;\n        real            avgDeliveryDays;\n        real            qualityScore;\n        int             totalOrders;\n        \n        cacheKey = this.AccountNum;\n        VendTableExtension::initCache();\n        \n        // Check cache first\n        if (VendTableExtension::vendorMetricsCache.exists(cacheKey))\n        {\n            metrics = VendTableExtension::vendorMetricsCache.lookup(cacheKey);\n            avgDeliveryDays = conPeek(metrics, 1);\n            qualityScore = conPeek(metrics, 2);\n            totalOrders = conPeek(metrics, 3);\n        }\n        else\n        {\n            // Expensive calculation - do once and cache\n            try\n            {\n                PurchTable      purchTable;\n                PurchLine       purchLine;\n                InventQualityOrderTable qualityOrder;\n                date            fromDate = DateTimeUtil::addMonths(today(), -12);\n                \n                // Calculate average delivery performance\n                select count(RecId) from purchTable\n                    where purchTable.OrderAccount == this.AccountNum &&\n                          purchTable.PurchStatus == PurchStatus::Received &&\n                          purchTable.DeliveryDate >= fromDate;\n                          \n                totalOrders = purchTable.RecId;\n                \n                if (totalOrders > 0)\n                {\n                    real totalDeliveryDays = 0;\n                    \n                    while select purchTable\n                        where purchTable.OrderAccount == this.AccountNum &&\n                              purchTable.PurchStatus == PurchStatus::Received &&\n                              purchTable.DeliveryDate >= fromDate\n                    {\n                        if (purchTable.ConfirmedDlv && purchTable.DeliveryDate)\n                        {\n                            totalDeliveryDays += purchTable.DeliveryDate - purchTable.ConfirmedDlv;\n                        }\n                    }\n                    \n                    avgDeliveryDays = totalDeliveryDays / totalOrders;\n                }\n                \n                // Calculate quality score from quality orders\n                int passedOrders = 0;\n                int totalQualityOrders = 0;\n                \n                select count(RecId) from qualityOrder\n                    where qualityOrder.RefTableId == tableNum(PurchLine) &&\n                          qualityOrder.CreatedDateTime >= DateTimeUtil::newDateTime(fromDate, 0);\n                          \n                totalQualityOrders = qualityOrder.RecId;\n                \n                if (totalQualityOrders > 0)\n                {\n                    select count(RecId) from qualityOrder\n                        where qualityOrder.RefTableId == tableNum(PurchLine) &&\n                              qualityOrder.TestResultValue >= 80 && // Assuming 80+ is pass\n                              qualityOrder.CreatedDateTime >= DateTimeUtil::newDateTime(fromDate, 0);\n                              \n                    passedOrders = qualityOrder.RecId;\n                    qualityScore = (passedOrders * 100.0) / totalQualityOrders;\n                }\n                \n                // Cache the results\n                metrics = [avgDeliveryDays, qualityScore, totalOrders];\n                VendTableExtension::vendorMetricsCache.insert(cacheKey, metrics);\n            }\n            catch (Exception::Error)\n            {\n                avgDeliveryDays = 0;\n                qualityScore = 0;\n                totalOrders = 0;\n            }\n        }\n        \n        // Format the display string\n        if (totalOrders > 0)\n        {\n            result = strFmt(\"Orders: %1 | Avg Delivery: %2 days | Quality: %3%%\",\n                           totalOrders,\n                           decRound(avgDeliveryDays, 1),\n                           decRound(qualityScore, 1));\n        }\n        else\n        {\n            result = \"No recent order history\";\n        }\n        \n        return result;\n    }\n    \n    /// <summary>\n    /// Clear cache when vendor data changes\n    /// </summary>\n    public void update()\n    {\n        super();\n        \n        // Invalidate cache for this vendor\n        if (VendTableExtension::vendorMetricsCache)\n        {\n            VendTableExtension::vendorMetricsCache.remove(this.AccountNum);\n        }\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute at form rendering time and are automatically cached per record by the kernel — use caching wisely to avoid stale data issues",
+        "Edit methods require both getter and setter logic in the same method using the _set parameter pattern — always validate input values before assignment",
+        "Method signatures must be exact: display methods take no parameters, edit methods take (boolean _set, <type> _value) parameters with proper default values",
+        "Form controls bind to display/edit methods via the DataMethod property — the kernel handles databinding automatically through reflection",
+        "Performance is critical: minimize database calls, leverage existing cursors, and implement manual caching for expensive calculations that don't change frequently"
+      ],
+      "gotchas": [
+        "Display methods called in grids execute for every visible row — avoid database queries without caching or you'll create N+1 query problems that destroy performance",
+        "Edit method validation errors thrown during the setter (_set=true) will prevent the assignment but may leave the form in an inconsistent state — always use proper error handling with ttsbegin/ttscommit",
+        "The kernel caches display method results per cursor position, not per form instance — if underlying data changes without triggering research(), users see stale values until they navigate away and back"
+      ],
+      "performance_tips": [
+        "Implement static caching with expiry for expensive calculations that are accessed frequently but don't change often — use Map containers with time-based cache invalidation",
+        "Leverage existing form datasource cursors instead of creating new database queries — use this.field() patterns to access already-loaded data wherever possible"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_tables",
+        "xpp_classes"
+      ],
+      "quiz": [
+        {
+          "q": "What happens if you throw an error in an edit method when _set is true?",
+          "options": [
+            "The form crashes",
+            "The assignment is prevented and user sees error message",
+            "The value is set to null",
+            "The method returns false"
+          ],
+          "answer": 1,
+          "explanation": "When _set is true, throwing an error prevents the assignment and displays the error message to the user. This is the proper way to validate input in edit methods."
+        },
+        {
+          "q": "How does the kernel cache display method results?",
+          "options": [
+            "Per form instance globally",
+            "Per cursor position and record",
+            "Never cached, always recalculated",
+            "Only when explicitly requested"
+          ],
+          "answer": 1,
+          "explanation": "The kernel automatically caches display method results per cursor position and record to avoid redundant calculations during grid scrolling or form refreshes."
+        },
+        {
+          "q": "What is the correct method signature for an edit method that handles a real value?",
+          "options": [
+            "[Edit] public real myMethod(real _value)",
+            "[Edit] public real myMethod(boolean _set, real _value = 0)",
+            "[Edit] public void myMethod(boolean _set, real _value)",
+            "[Edit] public real myMethod(real _value, boolean _set = false)"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods must follow the pattern [Edit] public <type> methodName(boolean _set = false, <type> _value = <default>) to handle both getting and setting values properly."
+        }
+      ]
+    },
+    "generated_date": "2026-05-21",
+    "auto_generated": true
   }
 ]

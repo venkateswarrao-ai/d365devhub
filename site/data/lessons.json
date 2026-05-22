@@ -7090,5 +7090,103 @@
     },
     "generated_date": "2026-05-21",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "15 min read",
+    "tags": [
+      "xpp",
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "tables",
+      "ui"
+    ],
+    "summary": "Master display and edit methods in X++ for dynamic field calculations, data formatting, and runtime field behavior in forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable dynamic field calculations and custom data presentation in forms, reports, and queries. Unlike regular table fields stored in the database, these methods execute at runtime to compute values based on current record data, providing powerful flexibility for business logic implementation.\n\nThese methods are essential for scenarios like calculated totals, formatted displays, derived values, and complex business rules that cannot be expressed through simple field definitions. They bridge the gap between raw data storage and meaningful business information presentation, making them critical for professional D365 F&O development.\n\nUnderstanding when to use display vs edit methods, their performance implications, and proper implementation patterns is crucial for building maintainable, performant solutions that align with Microsoft's recommended practices.",
+      "theory": "Display methods are read-only calculated fields that execute during form rendering, report generation, or query execution. They're defined using the 'display' keyword followed by the return type. Edit methods are their writable counterparts, enabling users to modify calculated or derived values through the UI.\n\nThe framework automatically recognizes these methods through reflection when they follow naming conventions and are properly decorated. The SysTableBrowser class uses reflection to discover display methods, while form controls bind to them through the DataSource.DataField property. The kernel's form engine calls these methods during record navigation, field updates, and refresh operations.\n\nInternally, the Application Object Server (AOS) caches method metadata for performance, but the actual method execution occurs on each call. This means display methods should be lightweight and avoid heavy database operations. The FormDataSource class manages the calling context and provides the record buffer that display methods operate on.\n\nDisplay methods can be defined on tables, forms, or form data sources. Table-level methods are globally available, while form-level methods provide context-specific calculations. The method resolution follows a hierarchy: form data source methods override form methods, which override table methods.",
+      "code_examples": [
+        {
+          "title": "Table Display Method with Business Logic",
+          "description": "A comprehensive display method on CustTable showing customer credit status with proper error handling",
+          "language": "xpp",
+          "code": "// On CustTable table\ndisplay CreditStatusDisplay creditStatusDisplay()\n{\n    CustCreditLimit     custCreditLimit;\n    AmountCur           availableCredit;\n    CreditStatusDisplay result;\n    \n    try\n    {\n        // Get current credit limit\n        select firstonly custCreditLimit\n            where custCreditLimit.AccountNum == this.AccountNum\n               && custCreditLimit.CurrencyCode == this.Currency;\n        \n        if (!custCreditLimit)\n        {\n            return 'No Limit Set';\n        }\n        \n        // Calculate available credit\n        availableCredit = custCreditLimit.CreditMax - this.custBalanceMST();\n        \n        if (availableCredit <= 0)\n        {\n            result = 'Over Limit';\n        }\n        else if (availableCredit < (custCreditLimit.CreditMax * 0.1)) // Less than 10%\n        {\n            result = 'Near Limit';\n        }\n        else\n        {\n            result = strFmt('Available: %1', num2Str(availableCredit, 2, 2, 1, 1));\n        }\n    }\n    catch (Exception::Error)\n    {\n        result = 'Calculation Error';\n        error('Error calculating credit status for customer ' + this.AccountNum);\n    }\n    \n    return result;\n}"
+        },
+        {
+          "title": "Form Edit Method with Validation",
+          "description": "An edit method on a form allowing users to modify calculated discounts with business rule validation",
+          "language": "xpp",
+          "code": "// On SalesTable form data source\nedit DiscountPct modifiedLineDiscountPct(boolean _set = false, DiscountPct _discount = 0)\n{\n    SalesLine       salesLine;\n    DiscountPct     totalDiscount;\n    DiscountPct     maxAllowedDiscount;\n    \n    if (_set)\n    {\n        try\n        {\n            ttsbegin;\n            \n            // Validate discount within business rules\n            maxAllowedDiscount = SalesParameters::find().MaxLineDiscountPct;\n            \n            if (_discount > maxAllowedDiscount)\n            {\n                throw error(strFmt('Discount %1 exceeds maximum allowed %2', \n                                 num2Str(_discount, 0, 2, 1, 1),\n                                 num2Str(maxAllowedDiscount, 0, 2, 1, 1)));\n            }\n            \n            // Apply discount to all lines\n            while select forupdate salesLine\n                where salesLine.SalesId == this.SalesId\n            {\n                salesLine.LinePercent = _discount;\n                \n                // Recalculate line amounts\n                salesLine.calcLineAmount();\n                salesLine.update();\n            }\n            \n            // Refresh totals\n            this.calcTotals();\n            \n            ttscommit;\n            \n            info(strFmt('Applied %1%% discount to all lines', num2Str(_discount, 0, 2, 1, 1)));\n        }\n        catch\n        {\n            ttsabort;\n            throw;\n        }\n    }\n    \n    // Calculate current average discount\n    select avg(LinePercent) from salesLine\n        where salesLine.SalesId == this.SalesId;\n    \n    return salesLine.LinePercent;\n}"
+        },
+        {
+          "title": "Performance-Optimized Display Method with Caching",
+          "description": "Advanced display method using static variables for caching expensive calculations",
+          "language": "xpp",
+          "code": "// On InventTable table\ndisplay AmountCur averageCostPrice()\n{\n    static Map              costCache;\n    static utcdatetime      lastRefresh;\n    static ItemId           lastItemId;\n    \n    InventTrans             inventTrans;\n    AmountCur               totalCost, totalQty, avgCost;\n    utcdatetime             currentDateTime = DateTimeUtil::utcNow();\n    \n    // Initialize cache if needed\n    if (!costCache)\n    {\n        costCache = new Map(Types::String, Types::Real);\n    }\n    \n    // Check if cache needs refresh (every 5 minutes or different item)\n    if (!lastRefresh || \n        DateTimeUtil::getDifference(currentDateTime, lastRefresh) > 300 || // 5 minutes\n        lastItemId != this.ItemId)\n    {\n        try\n        {\n            // Calculate average cost from transactions\n            while select CostAmountPosted, Qty from inventTrans\n                where inventTrans.ItemId == this.ItemId\n                   && inventTrans.StatusIssue == StatusIssue::Sold\n                   && inventTrans.DatePhysical >= datetobeginofyear(systemdateget())\n            {\n                totalCost += inventTrans.CostAmountPosted;\n                totalQty += abs(inventTrans.Qty);\n            }\n            \n            avgCost = totalQty != 0 ? totalCost / totalQty : 0;\n            \n            // Update cache\n            costCache.insert(this.ItemId, avgCost);\n            lastRefresh = currentDateTime;\n            lastItemId = this.ItemId;\n        }\n        catch (Exception::Error)\n        {\n            avgCost = 0;\n            warning(strFmt('Could not calculate average cost for item %1', this.ItemId));\n        }\n    }\n    else\n    {\n        // Use cached value\n        avgCost = costCache.lookup(this.ItemId);\n    }\n    \n    return avgCost;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute at runtime during form rendering and should be lightweight to avoid UI performance issues",
+        "Edit methods must handle both get and set operations using the _set parameter pattern for proper form integration",
+        "Table-level display/edit methods are globally available while form-level methods provide context-specific calculations",
+        "Use proper error handling with try/catch blocks and ttsbegin/ttscommit for transactional integrity in edit methods",
+        "Static variables in display methods can provide caching for expensive calculations but require careful cache invalidation logic"
+      ],
+      "gotchas": [
+        "Display methods called in grid views execute for every visible row — avoid database queries or complex calculations that will cause performance degradation when scrolling through large datasets",
+        "Edit methods without proper _set parameter handling will not integrate correctly with form controls and may cause data inconsistency or UI refresh issues",
+        "Display methods on tables are inherited by all forms using that table, which can cause unexpected behavior if the method makes assumptions about form context or user permissions"
+      ],
+      "performance_tips": [
+        "Cache expensive calculations using static variables with appropriate invalidation strategies, especially for display methods used in grids",
+        "Consider using computed columns or indexed views for complex calculations that display methods would perform repeatedly across large datasets"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_tables",
+        "xpp_queries"
+      ],
+      "quiz": [
+        {
+          "q": "What happens when a display method is used on a form grid with 1000 visible rows?",
+          "options": [
+            "The method executes once and caches the result",
+            "The method executes 1000 times, once per row",
+            "The method executes only when scrolling stops",
+            "The method executes asynchronously in the background"
+          ],
+          "answer": 1,
+          "explanation": "Display methods execute once for each visible row in a grid, which is why performance optimization is critical for display methods used in grid scenarios."
+        },
+        {
+          "q": "What is the correct pattern for implementing an edit method that modifies data?",
+          "options": [
+            "Use only a getter method with business logic",
+            "Use _set parameter to distinguish between get/set operations",
+            "Create separate getter and setter methods",
+            "Override the field's modified() method instead"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods use the _set parameter pattern where _set=false indicates a get operation and _set=true indicates a set operation with the new value passed as a parameter."
+        },
+        {
+          "q": "Where should you implement a display method that shows customer-specific calculations used across multiple forms?",
+          "options": [
+            "On each individual form's data source",
+            "On the base form class",
+            "On the CustTable table itself",
+            "In a global static class"
+          ],
+          "answer": 2,
+          "explanation": "Table-level display methods are globally available across all forms that use that table, making them the right choice for calculations that should be consistent across the application."
+        }
+      ]
+    },
+    "generated_date": "2026-05-22",
+    "auto_generated": true
   }
 ]

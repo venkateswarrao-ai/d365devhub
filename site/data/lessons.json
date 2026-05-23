@@ -7188,5 +7188,102 @@
     },
     "generated_date": "2026-05-22",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "ui-customization",
+      "calculated-fields",
+      "forms"
+    ],
+    "summary": "Master display and edit methods for creating calculated fields, custom UI behavior, and data transformations in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ concepts that enable calculated fields, custom data presentation, and interactive UI behaviors in D365 F&O. Display methods compute and return values without modifying data, while edit methods validate and process user input before storing it. These methods are essential for extending standard forms with business logic, creating derived fields that don't exist in tables, and implementing custom validation rules.\n\nUnlike regular table fields, display and edit methods execute at runtime, allowing dynamic calculations based on current data state, user context, or external systems. They're heavily used in customer modifications, ISV solutions, and when standard D365 functionality needs enhancement without core table modifications.\n\nMastering these methods is crucial for D365 developers because they bridge the gap between static data storage and dynamic business requirements, enabling sophisticated UI behaviors while maintaining data integrity and performance.",
+      "theory": "Display and edit methods leverage D365's model-driven architecture and are resolved through the kernel's metadata system. When a form loads, the kernel identifies display methods through AOT metadata and creates execution contexts that bind to specific table records. The kernel calls these methods during form refresh cycles, data source validation, and field update events.\n\nDisplay methods are marked with the [DisplayAttribute] and can be defined on tables, forms, or data sources. They're evaluated lazily when UI controls request their values, and results can be cached using the DisplayCache attribute for performance. The kernel automatically manages the method's execution context, ensuring the 'this' pointer references the correct table buffer.\n\nEdit methods use the [EditAttribute] and follow a two-phase pattern: getter for display and setter for validation/storage. They integrate with the form's data binding system, participating in the standard validation chain alongside table field validation. The kernel calls edit method setters during validateWrite() and field modification events, ensuring data consistency.\n\nBoth method types participate in D365's security framework through table-level and method-level security keys. They also respect field-level security when accessing underlying table data, making them suitable for implementing business rule-based data access patterns.",
+      "code_examples": [
+        {
+          "title": "Table Display Methods - Customer Credit Analysis",
+          "description": "Display methods on CustTable calculating derived financial metrics",
+          "language": "xpp",
+          "code": "[ExtensionOf(tableStr(CustTable))]\nfinal class CustTable_Extension\n{\n    /// <summary>\n    /// Calculates total outstanding amount across all open transactions\n    /// </summary>\n    [Display(\"Outstanding Amount\", \"Total outstanding customer balance\")]\n    public display AmountCur outstandingAmount()\n    {\n        CustTrans       custTrans;\n        AmountCurCredit totalOutstanding = 0;\n        \n        // Use company-aware select for multi-company scenarios\n        while select sum(AmountCur) from custTrans\n            where custTrans.AccountNum == this.AccountNum\n               && custTrans.Closed == NoYes::No\n               && custTrans.AmountCur != 0\n        {\n            totalOutstanding += custTrans.AmountCur;\n        }\n        \n        return totalOutstanding;\n    }\n    \n    /// <summary>\n    /// Determines credit status based on business rules\n    /// </summary>\n    [Display(\"Credit Status\", \"Calculated credit rating\")]\n    public display str creditStatusDisplay()\n    {\n        AmountCur outstanding = this.outstandingAmount();\n        AmountCur creditLimit = this.CreditMax;\n        \n        if (creditLimit == 0)\n        {\n            return \"No Limit\";\n        }\n        \n        real utilizationPct = (outstanding / creditLimit) * 100;\n        \n        if (utilizationPct >= 100)\n        {\n            return \"Over Limit\";\n        }\n        else if (utilizationPct >= 80)\n        {\n            return \"Near Limit\";\n        }\n        else if (utilizationPct >= 50)\n        {\n            return \"Moderate\";\n        }\n        else\n        {\n            return \"Good\";\n        }\n    }\n    \n    /// <summary>\n    /// Cached display method for expensive calculations\n    /// </summary>\n    [Display(\"Days Since Last Order\", \"Days since most recent sales order\"), DisplayCache]\n    public display int daysSinceLastOrder()\n    {\n        SalesTable  salesTable;\n        TransDate   lastOrderDate;\n        \n        select maxof(CreatedDate) from salesTable\n            where salesTable.CustAccount == this.AccountNum\n               && salesTable.SalesStatus != SalesStatus::Canceled;\n        \n        lastOrderDate = salesTable.CreatedDate;\n        \n        if (!lastOrderDate)\n        {\n            return -1; // No orders found\n        }\n        \n        return today() - lastOrderDate;\n    }\n}"
+        },
+        {
+          "title": "Form Edit Methods - Dynamic Pricing Calculator",
+          "description": "Edit method implementing custom pricing logic with validation on SalesLine form",
+          "language": "xpp",
+          "code": "[ExtensionOf(formStr(SalesEditLines))]\nfinal class SalesEditLines_Form_Extension\n{\n    /// <summary>\n    /// Custom discount percentage with business rule validation\n    /// </summary>\n    [Edit(\"Custom Discount %\", \"User-defined discount with approval workflow\")]\n    public edit DiscPct customDiscountPct(boolean _set = false, DiscPct _discPct = 0)\n    {\n        SalesLine salesLine = SalesLine_ds.cursor();\n        \n        if (_set)\n        {\n            // Validation phase - runs during field modification\n            if (_discPct < 0 || _discPct > 100)\n            {\n                throw error(\"Discount percentage must be between 0 and 100.\");\n            }\n            \n            // Business rule: discounts over 15% require approval\n            if (_discPct > 15.0)\n            {\n                UserInfo userInfo = UserInfo::find();\n                \n                // Check if user has special discount privileges\n                if (!SecurityRights::hasMenuItemAccess(\n                    SecurityRoleType::Privilege, \n                    menuItemActionStr(SalesLineHighDiscountApprove), \n                    MenuItemType::Action))\n                {\n                    throw error(\"Discounts over 15% require supervisor approval.\");\n                }\n            }\n            \n            ttsbegin;\n            try\n            {\n                // Custom field to store our discount\n                salesLine.selectForUpdate(true);\n                // Assuming we have a custom field added via extension\n                salesLine.CustomDiscPct = _discPct;\n                \n                // Recalculate line amount with new discount\n                salesLine.LineAmount = salesLine.calcLineAmountExclTax() * (1 - (_discPct / 100));\n                salesLine.update();\n                \n                ttscommit;\n                \n                info(strFmt(\"Applied %1%% discount to line. New amount: %2\", \n                    _discPct, salesLine.LineAmount));\n            }\n            catch (Exception::Error)\n            {\n                ttsabort;\n                throw;\n            }\n        }\n        \n        // Getter phase - return current value for display\n        return salesLine.CustomDiscPct;\n    }\n    \n    /// <summary>\n    /// Dynamic price calculator based on quantity breaks\n    /// </summary>\n    [Edit(\"Calculated Price\", \"Price with quantity break logic\")]\n    public edit SalesPrice calculatedPrice(boolean _set = false, SalesPrice _price = 0)\n    {\n        SalesLine salesLine = SalesLine_ds.cursor();\n        \n        if (_set)\n        {\n            // Read-only calculated field - ignore sets\n            return salesLine.SalesPrice;\n        }\n        \n        // Calculate price with quantity breaks\n        SalesPrice basePrice = salesLine.SalesPrice;\n        SalesQty qty = salesLine.SalesQty;\n        \n        if (qty >= 1000)\n        {\n            return basePrice * 0.85; // 15% volume discount\n        }\n        else if (qty >= 500)\n        {\n            return basePrice * 0.90; // 10% volume discount\n        }\n        else if (qty >= 100)\n        {\n            return basePrice * 0.95; // 5% volume discount\n        }\n        \n        return basePrice;\n    }\n}"
+        },
+        {
+          "title": "Advanced Display Method Patterns - Multi-Company Aggregation",
+          "description": "Complex display method with cross-company queries and caching strategies",
+          "language": "xpp",
+          "code": "[ExtensionOf(tableStr(VendTable))]\nfinal class VendTable_Extension\n{\n    private Map displayMethodCache;\n    \n    /// <summary>\n    /// Cross-company spend analysis with intelligent caching\n    /// </summary>\n    [Display(\"Total Spend (All Companies)\", \"12-month spend across all legal entities\")]\n    public display AmountMST totalSpendAllCompanies()\n    {\n        str cacheKey = strFmt(\"%1_TotalSpend_%2\", this.AccountNum, today());\n        \n        // Initialize cache if needed\n        if (!displayMethodCache)\n        {\n            displayMethodCache = new Map(Types::String, Types::Real);\n        }\n        \n        // Check cache first\n        if (displayMethodCache.exists(cacheKey))\n        {\n            return displayMethodCache.lookup(cacheKey);\n        }\n        \n        AmountMST       totalSpend = 0;\n        VendTrans       vendTrans;\n        CompanyInfo     companyInfo;\n        container       companies = conNull();\n        int             i;\n        \n        try\n        {\n            // Build list of companies where vendor exists\n            while select DataAreaId from companyInfo\n                order by DataAreaId\n            {\n                changeCompany(companyInfo.DataAreaId)\n                {\n                    if (VendTable::exist(this.AccountNum))\n                    {\n                        companies = conIns(companies, conLen(companies) + 1, companyInfo.DataAreaId);\n                    }\n                }\n            }\n            \n            // Aggregate transactions across companies\n            for (i = 1; i <= conLen(companies); i++)\n            {\n                str companyId = conPeek(companies, i);\n                \n                changeCompany(companyId)\n                {\n                    while select sum(AmountMST) from vendTrans\n                        where vendTrans.AccountNum == this.AccountNum\n                           && vendTrans.TransDate >= (today() - 365) // Last 12 months\n                           && vendTrans.TransType != LedgerTransType::Payment // Exclude payments\n                    {\n                        totalSpend += vendTrans.AmountMST;\n                    }\n                }\n            }\n            \n            // Cache result for 1 hour (performance optimization)\n            displayMethodCache.insert(cacheKey, totalSpend);\n        }\n        catch (Exception::Error)\n        {\n            // Log error but don't fail UI\n            warning(\"Could not calculate total spend across companies.\");\n            return 0;\n        }\n        \n        return abs(totalSpend); // Return positive amount\n    }\n    \n    /// <summary>\n    /// Payment terms analysis with risk scoring\n    /// </summary>\n    [Display(\"Payment Risk Score\", \"Calculated payment risk based on history\")]\n    public display int paymentRiskScore()\n    {\n        VendTrans       vendTrans;\n        int             totalInvoices = 0;\n        int             latePayments = 0;\n        AmountMST       avgPaymentDays = 0;\n        \n        // Analyze payment patterns over last 6 months\n        while select * from vendTrans\n            where vendTrans.AccountNum == this.AccountNum\n               && vendTrans.TransDate >= (today() - 180)\n               && vendTrans.TransType == LedgerTransType::Vend\n               && vendTrans.Closed == NoYes::Yes\n        {\n            totalInvoices++;\n            \n            // Calculate days between due date and actual payment\n            if (vendTrans.DueDate && vendTrans.Closed == NoYes::Yes)\n            {\n                int paymentDays = vendTrans.ClosedDate - vendTrans.DueDate;\n                avgPaymentDays += paymentDays;\n                \n                if (paymentDays > 0) // Late payment\n                {\n                    latePayments++;\n                }\n            }\n        }\n        \n        if (totalInvoices == 0)\n        {\n            return 50; // Neutral score for new vendors\n        }\n        \n        avgPaymentDays = avgPaymentDays / totalInvoices;\n        real latePaymentPct = (latePayments * 100.0) / totalInvoices;\n        \n        // Risk scoring algorithm\n        int riskScore = 100; // Start with perfect score\n        \n        riskScore -= real2int(latePaymentPct * 0.5); // Reduce for late payment percentage\n        riskScore -= real2int(max(0, avgPaymentDays) * 2); // Reduce for average lateness\n        \n        return max(0, min(100, riskScore)); // Ensure score is between 0-100\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods are read-only calculated fields that execute at runtime, while edit methods provide custom input validation and processing logic",
+        "Use DisplayCache attribute for expensive calculations that don't change frequently within a session to improve form performance",
+        "Edit methods follow a two-phase pattern: getter for display and setter for validation, both triggered by different form events",
+        "Display and edit methods participate in D365's security framework and respect both table-level and method-level security permissions",
+        "Cross-company display methods require changeCompany() statements and careful exception handling to prevent UI failures"
+      ],
+      "gotchas": [
+        "Never modify data in display methods — they should be pure functions that only calculate and return values without side effects",
+        "Edit method setters must validate input thoroughly since they bypass standard table field validation unless explicitly called",
+        "Avoid complex queries in display methods without caching as they execute on every form refresh, causing severe performance issues"
+      ],
+      "performance_tips": [
+        "Use DisplayCache attribute for display methods with expensive calculations and implement manual cache invalidation strategies",
+        "Prefer exists() joins over select statements in display methods when only checking for record existence to reduce database roundtrips"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_select",
+        "xpp_classes"
+      ],
+      "quiz": [
+        {
+          "q": "What is the primary difference between display and edit methods in X++?",
+          "options": [
+            "Display methods modify data while edit methods only show values",
+            "Display methods are read-only calculated fields while edit methods handle input validation and processing",
+            "Display methods run on the server while edit methods run on the client",
+            "Display methods are cached while edit methods are not"
+          ],
+          "answer": 1,
+          "explanation": "Display methods are read-only and used for calculated fields that don't modify underlying data, while edit methods provide custom input validation and processing logic with both getter and setter functionality."
+        },
+        {
+          "q": "When should you use the DisplayCache attribute?",
+          "options": [
+            "Always use it for better performance",
+            "Never use it as it causes memory leaks",
+            "For display methods with expensive calculations that don't change frequently within a session",
+            "Only for methods that access external systems"
+          ],
+          "answer": 2,
+          "explanation": "DisplayCache should be used for display methods with expensive calculations (complex queries, external calls) that produce the same result during a form session, improving performance by avoiding repeated execution."
+        },
+        {
+          "q": "What happens when an edit method setter throws an exception?",
+          "options": [
+            "The form closes automatically",
+            "The field value is reset to its original state and the user sees an error message",
+            "The exception is ignored and the value is saved anyway",
+            "The entire transaction is rolled back"
+          ],
+          "answer": 1,
+          "explanation": "When an edit method setter throws an exception, D365 prevents the field update, displays the error message to the user, and keeps the field in its previous state, allowing the user to correct the input."
+        }
+      ]
+    },
+    "generated_date": "2026-05-23",
+    "auto_generated": true
   }
 ]

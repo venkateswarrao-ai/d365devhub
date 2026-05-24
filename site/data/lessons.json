@@ -7285,5 +7285,102 @@
     },
     "generated_date": "2026-05-23",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display methods",
+      "edit methods",
+      "forms",
+      "reports",
+      "computed fields"
+    ],
+    "summary": "Master display and edit methods for creating computed fields and implementing complex business logic on forms and reports in D365 F&O.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ patterns that enable calculated fields and custom data manipulation on forms, reports, and data entities. Unlike stored table fields, these methods execute at runtime to compute values based on current record state or external data sources. They're essential for showing derived information like formatted addresses, calculated totals, or status indicators without storing redundant data.\n\nDisplay methods return computed values for read-only scenarios, while edit methods enable bi-directional data binding where user input can update underlying table fields. Understanding their execution context, performance implications, and proper implementation patterns is crucial for building responsive, maintainable D365 F&O applications.\n\nThese methods integrate seamlessly with the AOT metadata system, appearing as virtual fields in form designs, report datasets, and data entity definitions, making them powerful tools for extending standard D365 functionality without customizing base tables.",
+      "theory": "Display and edit methods in X++ follow a specific naming convention and signature pattern that the kernel recognizes for automatic binding. Display methods must be declared with the 'display' modifier followed by the return type, while edit methods use 'edit' with the parameter type they accept. The framework automatically passes the current table buffer as context, enabling access to all record fields and related data.\n\nThe execution model differs significantly from standard methods. Display methods execute during form refresh cycles, report generation, and data entity serialization. The kernel caches results within the same transaction scope but re-executes them when the underlying record changes or explicit refresh occurs. This caching behavior is managed by the RecordInsertList and RecordSortedList classes, which track buffer state changes.\n\nFor forms, the FormDataSource class manages the binding between display/edit methods and form controls through the DataSource.object() reference. The FormRun.task() method coordinates refresh cycles, calling display methods when buffer values change or when explicit refresh() calls occur. Report generation follows a similar pattern through the ReportRun class hierarchy, where display methods execute during data retrieval phases.\n\nEdit methods implement a more complex pattern involving temporary value storage and validation. When a user modifies an edit method field, the framework calls the edit method with the new value, expecting the method to update appropriate table fields and return the processed value. The validateWrite() and write() table methods then handle persistence, with edit methods often triggering additional validation logic through the table's field validation methods.",
+      "code_examples": [
+        {
+          "title": "Basic Display Method Implementation",
+          "description": "Shows standard display method syntax with formatting and null handling for customer information",
+          "language": "xpp",
+          "code": "public class CustTable extends Common\n{\n    // Display method showing formatted customer name with account\n    display CustName displayCustomerInfo()\n    {\n        CustName ret;\n        \n        if (this.AccountNum && this.Name)\n        {\n            ret = strFmt('%1 - %2', this.AccountNum, this.Name);\n        }\n        else\n        {\n            ret = this.AccountNum ? this.AccountNum : this.Name;\n        }\n        \n        return ret;\n    }\n    \n    // Display method with complex business logic\n    display AmountCur displayCreditBalance()\n    {\n        CustTrans       custTrans;\n        AmountCur       balance = 0;\n        \n        select sum(AmountCur) from custTrans\n            where custTrans.AccountNum == this.AccountNum\n            && custTrans.TransType == CustTransType::Sales;\n            \n        return custTrans.AmountCur;\n    }\n    \n    // Display method using related tables with error handling\n    display LogisticsPostalAddressFormatted displayFormattedAddress()\n    {\n        LogisticsPostalAddress          postalAddress;\n        LogisticsPostalAddressFormatted formattedAddress;\n        DirPartyLocation               partyLocation;\n        \n        try\n        {\n            select firstonly postalAddress\n                join partyLocation\n                where partyLocation.Party == this.Party\n                && partyLocation.Location == postalAddress.Location\n                && partyLocation.IsPrimary == NoYes::Yes;\n                \n            if (postalAddress.RecId)\n            {\n                formattedAddress = LogisticsPostalAddress::formatAddress(postalAddress.RecId);\n            }\n        }\n        catch (Exception::Error)\n        {\n            formattedAddress = \"Address not available\";\n        }\n        \n        return formattedAddress;\n    }\n}"
+        },
+        {
+          "title": "Edit Method with Validation and Business Logic",
+          "description": "Demonstrates edit method pattern with validation, field updates, and error handling for inventory management",
+          "language": "xpp",
+          "code": "public class InventTable extends Common\n{\n    // Edit method for unit price with validation\n    edit Price editUnitPrice(boolean _set = false, Price _unitPrice = 0)\n    {\n        Price ret = this.UnitPrice;\n        \n        if (_set)\n        {\n            // Validation logic\n            if (_unitPrice < 0)\n            {\n                throw error(\"@SYS18447\"); // \"Value must be positive\"\n            }\n            \n            // Check for active transactions before allowing price change\n            if (this.RecId && this.hasActiveTransactions())\n            {\n                if (!Box::yesNo(\"@SYS89543\", DialogButton::No)) // \"Item has active transactions. Continue?\"\n                {\n                    return ret;\n                }\n            }\n            \n            // Update the actual field\n            ttsbegin;\n            try\n            {\n                this.selectForUpdate(true);\n                this.UnitPrice = _unitPrice;\n                this.update();\n                \n                // Trigger related updates\n                this.updateSalesPrice(_unitPrice);\n                \n                ret = this.UnitPrice;\n                ttscommit;\n                \n                info(strFmt(\"Unit price updated to %1 for item %2\", \n                           this.UnitPrice, this.ItemId));\n            }\n            catch (Exception::Error)\n            {\n                ttsabort;\n                throw;\n            }\n        }\n        \n        return ret;\n    }\n    \n    // Supporting method for validation\n    private boolean hasActiveTransactions()\n    {\n        InventTrans inventTrans;\n        \n        select firstonly RecId from inventTrans\n            where inventTrans.ItemId == this.ItemId\n            && inventTrans.StatusReceipt == StatusReceipt::Ordered\n            || inventTrans.StatusIssue == StatusIssue::Ordered;\n            \n        return inventTrans.RecId != 0;\n    }\n    \n    // Method to update related sales prices\n    private void updateSalesPrice(Price _newPrice)\n    {\n        SalesPrice salesPrice;\n        \n        update_recordset salesPrice\n            setting Price = _newPrice\n            where salesPrice.ItemId == this.ItemId\n            && salesPrice.ToDate >= DateTimeUtil::date(DateTimeUtil::utcNow());\n    }\n}"
+        },
+        {
+          "title": "Advanced Display Methods for Forms and Reports",
+          "description": "Complex display methods with caching, performance optimization, and cross-company scenarios",
+          "language": "xpp",
+          "code": "public class SalesTable extends Common\n{\n    // Cached display method with cross-company logic\n    private container   cachedTotals;\n    private RecId       cachedRecId;\n    \n    display AmountCur displayOrderTotal()\n    {\n        AmountCur       total = 0;\n        SalesLine       salesLine;\n        container       totals;\n        \n        // Use caching to avoid repeated calculations\n        if (this.RecId != cachedRecId || !cachedTotals)\n        {\n            changecompany(this.dataAreaId)\n            {\n                select sum(LineAmount) from salesLine\n                    where salesLine.SalesId == this.SalesId;\n            }\n            \n            cachedTotals = [salesLine.LineAmount, DateTimeUtil::utcNow()];\n            cachedRecId = this.RecId;\n        }\n        \n        total = conPeek(cachedTotals, 1);\n        return total;\n    }\n    \n    // Display method with conditional formatting metadata\n    display str displayOrderStatus()\n    {\n        str statusText;\n        \n        switch (this.SalesStatus)\n        {\n            case SalesStatus::Backorder:\n                statusText = \"@SYS4004\"; // \"Backorder\"\n                break;\n            case SalesStatus::Delivered:\n                statusText = \"@SYS5711\"; // \"Delivered\" \n                break;\n            case SalesStatus::Invoiced:\n                statusText = \"@SYS318678\"; // \"Invoiced\"\n                break;\n            case SalesStatus::OpenOrder:\n                statusText = \"@SYS23078\"; // \"Open order\"\n                break;\n            default:\n                statusText = enum2Str(this.SalesStatus);\n        }\n        \n        return statusText;\n    }\n    \n    // Display method for form performance with joins\n    display CustName displayCustomerName()\n    {\n        CustTable custTable;\n        \n        // Efficient join to avoid multiple queries\n        if (!custTable || custTable.AccountNum != this.CustAccount)\n        {\n            select Name from custTable\n                where custTable.AccountNum == this.CustAccount;\n        }\n        \n        return custTable.Name;\n    }\n    \n    // Edit method with complex validation chain\n    edit CustAccount editCustomerAccount(boolean _set = false, CustAccount _custAccount = '')\n    {\n        CustAccount ret = this.CustAccount;\n        CustTable   custTable;\n        \n        if (_set)\n        {\n            // Validate customer exists and is active\n            select firstonly custTable\n                where custTable.AccountNum == _custAccount\n                && custTable.Blocked == CustVendorBlocked::No;\n                \n            if (!custTable.RecId)\n            {\n                throw error(strFmt(\"@SYS25249\", _custAccount)); // \"Customer %1 not found or blocked\"\n            }\n            \n            // Check credit limit\n            if (custTable.CreditMax > 0 && this.displayOrderTotal() > custTable.CreditMax)\n            {\n                warning(strFmt(\"Order total exceeds credit limit for customer %1\", _custAccount));\n            }\n            \n            this.CustAccount = _custAccount;\n            \n            // Clear cached values when customer changes\n            this.clearDisplayCache();\n            \n            ret = this.CustAccount;\n        }\n        \n        return ret;\n    }\n    \n    private void clearDisplayCache()\n    {\n        cachedTotals = conNull();\n        cachedRecId = 0;\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods use 'display ReturnType methodName()' signature and execute during form refresh cycles, report generation, and data entity operations",
+        "Edit methods require 'edit FieldType methodName(boolean _set, FieldType _value)' pattern with conditional logic based on _set parameter",
+        "The framework automatically binds display/edit methods to form controls and report fields when method names match field binding expressions",
+        "Caching strategies are essential for performance — store computed values in class variables and invalidate when underlying data changes",
+        "Cross-company scenarios require changecompany() statements within display/edit methods to access data from different legal entities"
+      ],
+      "gotchas": [
+        "Display methods execute on every form refresh — avoid expensive database queries without caching or you'll create performance bottlenecks that scale poorly with record counts",
+        "Edit method validation failures must use throw error() instead of return false — the framework expects exceptions for validation errors, not boolean returns",
+        "Circular dependencies between display methods and table field validations can cause infinite loops — use static flags or separate validation methods to break cycles"
+      ],
+      "performance_tips": [
+        "Implement field-level caching in display methods using class variables and RecId tracking to avoid redundant calculations during single transaction scope",
+        "Use select statements with specific field lists and appropriate indexes rather than loading full table buffers when computing display values from related tables"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_select",
+        "xpp_classes"
+      ],
+      "quiz": [
+        {
+          "q": "What happens if a display method throws an unhandled exception during form refresh?",
+          "options": [
+            "The form closes with an error",
+            "The field shows blank and form continues",
+            "The entire form refresh cycle stops",
+            "Only that specific control becomes disabled"
+          ],
+          "answer": 2,
+          "explanation": "When a display method throws an unhandled exception, it stops the entire form refresh cycle. This is why proper try/catch blocks are essential in display methods — one failing display method can prevent other fields from updating properly."
+        },
+        {
+          "q": "In an edit method, when should you return the original value versus the new value?",
+          "options": [
+            "Always return the new value after validation",
+            "Return original value if _set is false, new value if _set is true",
+            "Return new value only if validation passes, otherwise return original",
+            "Always return the current table field value"
+          ],
+          "answer": 2,
+          "explanation": "Edit methods should return the new value only if validation passes and the update succeeds. If validation fails or _set is false, return the original/current value. This ensures the UI reflects the actual data state after edit operations."
+        },
+        {
+          "q": "Why should display methods avoid using changecompany() without caching?",
+          "options": [
+            "It causes security violations",
+            "It creates excessive database connections",
+            "It triggers unnecessary cross-company queries on every refresh",
+            "It breaks transaction consistency"
+          ],
+          "answer": 2,
+          "explanation": "Using changecompany() in display methods without caching means every form refresh triggers cross-company database queries. Since display methods execute frequently, this creates significant performance overhead. Cache results and invalidate appropriately to minimize cross-company calls."
+        }
+      ]
+    },
+    "generated_date": "2026-05-24",
+    "auto_generated": true
   }
 ]

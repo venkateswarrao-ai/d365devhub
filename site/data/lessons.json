@@ -7382,5 +7382,103 @@
     },
     "generated_date": "2026-05-24",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "table-methods",
+      "ui-integration"
+    ],
+    "summary": "Master display and edit methods to create calculated fields, implement business logic, and enhance form functionality in D365 F&O.",
+    "content": {
+      "overview": "Display and edit methods are fundamental mechanisms in D365 F&O for creating virtual fields that don't exist in physical tables, implementing calculated values, and extending form functionality without modifying table structures. These methods bridge the gap between data storage and presentation, enabling complex business logic to be seamlessly integrated into forms, reports, and data sources. Unlike regular table fields, display and edit methods execute at runtime, providing dynamic content that can depend on multiple data sources, user context, or complex calculations. They're extensively used throughout D365 F&O's standard application, from displaying formatted customer names to calculating inventory availability in real-time.",
+      "theory": "Display methods return calculated or formatted data without modifying the underlying record, while edit methods allow users to input data that triggers business logic or updates related records. Both method types are defined on tables, classes, or forms and are automatically recognized by the form engine through their method signatures. The framework uses reflection to identify these methods by their return types and naming patterns: display methods return a value and are prefixed with 'display', while edit methods return boolean and are prefixed with 'edit'. The SysTableBrowser class and FormDataSource framework automatically bind these methods to form controls, enabling seamless integration without manual wire-up. Performance-wise, these methods execute for each record displayed, making caching and optimization crucial for large datasets. The kernel caches display method results per record within a single transaction scope, but complex calculations should implement their own caching mechanisms using Map or Set collections.",
+      "code_examples": [
+        {
+          "title": "Display Method - Customer Full Name",
+          "description": "Shows how to create a display method on CustTable to concatenate and format customer name components with proper null handling",
+          "language": "xpp",
+          "code": "// On CustTable table\n[SysClientCacheDataMethodAttribute(true)]\ndisplay CustName displayFullName()\n{\n    CustName fullName;\n    DirPartyTable partyTable;\n    \n    select firstonly Name from partyTable\n        where partyTable.RecId == this.Party;\n    \n    if (partyTable.Name)\n    {\n        fullName = strFmt('%1 (%2)', partyTable.Name, this.AccountNum);\n    }\n    else\n    {\n        fullName = this.AccountNum;\n    }\n    \n    return fullName;\n}\n\n// Usage in form design: Add StringEdit control and set DataMethod property to 'displayFullName'"
+        },
+        {
+          "title": "Edit Method - Credit Limit Override",
+          "description": "Demonstrates edit method implementation with validation, security checks, and transaction handling for modifying credit limits",
+          "language": "xpp",
+          "code": "// On CustTable table\nedit AmountCur editCreditLimitOverride(boolean _set = false, AmountCur _creditLimit = 0)\n{\n    AmountCur currentLimit;\n    CustCreditLimitParameters creditParams;\n    \n    if (_set)\n    {\n        // Validate security permission\n        if (!CustCreditLimitSecurity::hasOverridePermission())\n        {\n            throw error(\"@SYS318637\"); // Insufficient permissions\n        }\n        \n        // Validate amount\n        if (_creditLimit < 0)\n        {\n            throw error(\"Credit limit cannot be negative\");\n        }\n        \n        try\n        {\n            ttsbegin;\n            \n            // Update credit limit with audit trail\n            this.CreditMax = _creditLimit;\n            this.CreditLimitOverrideDate = DateTimeUtil::getSystemDateTime();\n            this.CreditLimitOverrideUser = curUserId();\n            this.update();\n            \n            // Log the change\n            CustCreditLimitLog::createLog(this.AccountNum, this.CreditMax, _creditLimit);\n            \n            ttscommit;\n            \n            info(strFmt(\"Credit limit updated to %1 for customer %2\", \n                        num2StrInUserLanguage(_creditLimit, -1, 2, 1, 1),\n                        this.AccountNum));\n        }\n        catch (Exception::Error)\n        {\n            error(\"Failed to update credit limit\");\n        }\n    }\n    \n    return this.CreditMax;\n}"
+        },
+        {
+          "title": "Performance-Optimized Display Method with Caching",
+          "description": "Shows advanced pattern for caching expensive calculations in display methods using static variables and record-level invalidation",
+          "language": "xpp",
+          "code": "// On InventTable table - Calculate available inventory across all warehouses\npublic class InventTableDisplayMethods\n{\n    private static Map inventAvailabilityCache;\n    private static utcDateTime lastCacheRefresh;\n    private static final int CACHE_VALIDITY_MINUTES = 5;\n    \n    [SysClientCacheDataMethodAttribute(true)]\n    display InventQty displayAvailableInventory()\n    {\n        ItemId itemId = this.ItemId;\n        InventQty availableQty;\n        utcDateTime currentTime = DateTimeUtil::getSystemDateTime();\n        \n        // Initialize cache if needed\n        if (!inventAvailabilityCache)\n        {\n            inventAvailabilityCache = new Map(Types::String, Types::Real);\n            lastCacheRefresh = currentTime;\n        }\n        \n        // Check if cache needs refresh (every 5 minutes)\n        if (DateTimeUtil::getDifference(currentTime, lastCacheRefresh) > (CACHE_VALIDITY_MINUTES * 60))\n        {\n            inventAvailabilityCache.clear();\n            lastCacheRefresh = currentTime;\n        }\n        \n        // Try to get from cache first\n        if (inventAvailabilityCache.exists(itemId))\n        {\n            availableQty = inventAvailabilityCache.lookup(itemId);\n        }\n        else\n        {\n            // Calculate expensive inventory sum\n            InventSum inventSum;\n            \n            select sum(AvailPhysical) from inventSum\n                where inventSum.ItemId == itemId\n                   && inventSum.Closed == NoYes::No;\n            \n            availableQty = inventSum.AvailPhysical;\n            \n            // Cache the result\n            inventAvailabilityCache.insert(itemId, availableQty);\n        }\n        \n        return availableQty;\n    }\n    \n    // Method to invalidate cache for specific item\n    public static void invalidateItemCache(ItemId _itemId)\n    {\n        if (inventAvailabilityCache && inventAvailabilityCache.exists(_itemId))\n        {\n            inventAvailabilityCache.remove(_itemId);\n        }\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods must have exactly one parameter-less signature or use the standard edit method pattern (_set, _value) to be recognized by the form engine",
+        "Use SysClientCacheDataMethodAttribute(true) on display methods to enable automatic client-side caching for better performance in large datasets",
+        "Edit methods should always validate user permissions and input data before modifying any records, using proper exception handling",
+        "Implement caching strategies for expensive display method calculations, especially when dealing with aggregated data or complex joins",
+        "Display and edit methods execute for every visible record in forms, so optimize database queries and avoid N+1 query patterns"
+      ],
+      "gotchas": [
+        "Display methods with database queries create N+1 query problems in grids — always implement caching or use batch queries with temporary tables for better performance",
+        "Edit methods don't automatically refresh related form controls — use FormDataSource.research() or specific control.refresh() calls to update dependent fields after modifications",
+        "Avoid calling super() in display/edit method overrides on tables unless absolutely necessary, as it can cause recursive calls and stack overflow exceptions"
+      ],
+      "performance_tips": [
+        "Use static Map collections to cache frequently accessed calculated values, with appropriate cache invalidation strategies based on business logic requirements",
+        "Implement batch loading patterns for display methods that require database access by pre-loading data into temporary tables during form initialization"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_classes",
+        "forms_development",
+        "data_sources"
+      ],
+      "quiz": [
+        {
+          "q": "What attribute should you use on display methods to enable client-side caching?",
+          "options": [
+            "SysDisplayMethodAttribute",
+            "SysClientCacheDataMethodAttribute",
+            "SysCacheAttribute",
+            "SysFormMethodAttribute"
+          ],
+          "answer": 1,
+          "explanation": "SysClientCacheDataMethodAttribute(true) enables client-side caching for display methods, improving performance by avoiding repeated server calls for the same data."
+        },
+        {
+          "q": "How does the framework identify edit methods automatically?",
+          "options": [
+            "By the method name starting with 'edit'",
+            "By the return type being boolean and specific parameter pattern",
+            "By special attributes on the method",
+            "By inheritance from SysEditMethod"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods are identified by their boolean return type and the standard parameter pattern: methodName(boolean _set = false, DataType _value = defaultValue)."
+        },
+        {
+          "q": "When do display method calculations execute in forms?",
+          "options": [
+            "Only when the form loads",
+            "When the record is selected",
+            "For every visible record in the current view",
+            "Only when explicitly called"
+          ],
+          "answer": 2,
+          "explanation": "Display methods execute for every visible record in forms and grids, which is why performance optimization and caching are crucial for methods with expensive calculations."
+        }
+      ]
+    },
+    "generated_date": "2026-05-25",
+    "auto_generated": true
   }
 ]

@@ -7480,5 +7480,102 @@
     },
     "generated_date": "2026-05-25",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "ui-logic",
+      "calculated-fields"
+    ],
+    "summary": "Learn how to implement display and edit methods in X++ to create calculated fields and custom UI logic for D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are specialized X++ methods that enable you to create calculated fields and custom UI interactions in D365 F&O forms, reports, and data sources. Unlike regular table fields, these methods execute at runtime to compute values based on current data context, making them essential for presenting derived information without storing redundant data. Display methods are read-only calculated fields that show computed values, while edit methods allow users to input data that gets processed and stored in underlying table fields. These methods are fundamental to creating rich, interactive user experiences in D365 F&O applications while maintaining clean data architecture and following Microsoft's recommended patterns for UI customization.",
+      "theory": "Display and edit methods are declared with the [Display] and [Edit] attributes respectively, and must follow specific naming conventions and return type requirements. The kernel automatically detects these methods when binding form controls or report fields, creating a seamless integration between your X++ logic and the UI layer. Display methods execute during form refresh cycles and data source operations, while edit methods trigger when users modify field values. Both method types have access to the current record context through the 'this' pointer, allowing you to reference any field in the current table or traverse related tables using foreign key relationships. The SysTableBrowser framework and form data source architecture heavily rely on these methods for metadata-driven UI generation. Performance is critical since these methods execute frequently during UI operations - the kernel caches results where possible, but inefficient implementations can severely impact form loading and refresh times. These methods integrate with the Application Object Tree (AOT) metadata system, making them discoverable by forms, reports, and other UI components without explicit binding code.",
+      "code_examples": [
+        {
+          "title": "Table Display Method - Customer Credit Status",
+          "description": "A display method on the CustTable that calculates and displays customer credit status with proper error handling and related table access",
+          "language": "xpp",
+          "code": "// On CustTable table\n[Display]\npublic str creditStatusDisplay()\n{\n    str             creditStatus;\n    CustCollectionLetterLine collectionLine;\n    real            creditLimit, currentBalance;\n    \n    try\n    {\n        creditLimit = this.CreditMax;\n        currentBalance = this.balanceMST();\n        \n        if (creditLimit == 0)\n        {\n            creditStatus = \"@SYS54186\"; // No limit\n        }\n        else if (currentBalance <= 0)\n        {\n            creditStatus = \"@SYS325890\"; // Good standing\n        }\n        else if (currentBalance >= creditLimit)\n        {\n            // Check for collection letters\n            select firstonly collectionLine\n                where collectionLine.AccountNum == this.AccountNum\n                && collectionLine.Blocked == NoYes::Yes;\n            \n            creditStatus = collectionLine.RecId ? \"@SYS325891\" : \"@SYS325892\"; // Blocked : Over limit\n        }\n        else\n        {\n            creditStatus = strFmt(\"@SYS325893\", (creditLimit - currentBalance)); // Available: %1\n        }\n    }\n    catch (Exception::Error)\n    {\n        creditStatus = \"@SYS325894\"; // Error calculating\n        error(\"Error calculating credit status for customer \" + this.AccountNum);\n    }\n    \n    return creditStatus;\n}"
+        },
+        {
+          "title": "Form Data Source Edit Method - Sales Line Discount",
+          "description": "An edit method on a form data source that allows users to enter discount percentages with validation and automatic recalculation",
+          "language": "xpp",
+          "code": "// On SalesLine form data source\n[Edit]\npublic Percent discountPercentEdit(Percent _discountPercent = 0)\n{\n    SalesLine   salesLine = this as SalesLine;\n    boolean     isSetMode = _discountPercent != 0 || !prmisDefault(_discountPercent);\n    \n    if (isSetMode)\n    {\n        ttsbegin;\n        try\n        {\n            // Validate discount percentage\n            if (_discountPercent < 0 || _discountPercent > 100)\n            {\n                throw error(\"@SYS325895\"); // Invalid discount percentage\n            }\n            \n            // Check if user has permission for this discount level\n            if (_discountPercent > 20 && !hasMenuItemAccess(menuItemActionStr(SalesLineHighDiscount), MenuItemType::Action))\n            {\n                throw error(\"@SYS325896\"); // Insufficient permissions for discount level\n            }\n            \n            // Calculate new line discount amount\n            salesLine.LineDisc = _discountPercent;\n            salesLine.LineDiscAmount = salesLine.calcLineDiscAmount();\n            \n            // Recalculate line amount\n            salesLine.LineAmount = salesLine.calcLineAmount();\n            \n            // Update the record\n            salesLine.update();\n            \n            // Refresh totals\n            element.salesTable_ds.research();\n            \n            info(strFmt(\"@SYS325897\", _discountPercent, salesLine.LineDiscAmount)); // Discount applied: %1% (%2)\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            return salesLine.LineDisc;\n        }\n    }\n    \n    return salesLine.LineDisc;\n}"
+        },
+        {
+          "title": "Advanced Display Method with Caching - Inventory Availability",
+          "description": "A performance-optimized display method that calculates inventory availability with intelligent caching and batch processing",
+          "language": "xpp",
+          "code": "// On InventTable table\nprivate static Map inventAvailabilityCache;\n\n[Display]\npublic str availabilityDisplay()\n{\n    str             availability;\n    InventSum       inventSum;\n    InventDim       inventDim;\n    real            physicalQty, reservedQty, availableQty;\n    str             cacheKey;\n    \n    // Initialize cache if not exists\n    if (!InventTable::inventAvailabilityCache)\n    {\n        InventTable::inventAvailabilityCache = new Map(Types::String, Types::String);\n    }\n    \n    // Create cache key based on item and current datetime\n    cacheKey = this.ItemId + \"#\" + DateTimeUtil::toStr(DateTimeUtil::utcNow());\n    \n    // Check cache first (5 minute cache)\n    if (InventTable::inventAvailabilityCache.exists(cacheKey))\n    {\n        return InventTable::inventAvailabilityCache.lookup(cacheKey);\n    }\n    \n    try\n    {\n        // Get default inventory dimension\n        inventDim = InventDim::findOrCreate(InventTable::inventDimFieldsBlank());\n        \n        // Calculate availability across all sites\n        while select sum(PhysicalInvent), sum(ReservPhysical) from inventSum\n            where inventSum.ItemId == this.ItemId\n            && inventSum.Closed == NoYes::No\n        {\n            physicalQty += inventSum.PhysicalInvent;\n            reservedQty += inventSum.ReservPhysical;\n        }\n        \n        availableQty = physicalQty - reservedQty;\n        \n        // Format availability string with status icon\n        if (availableQty <= 0)\n        {\n            availability = \"⚠️ \" + strFmt(\"@SYS325898\", abs(availableQty)); // Out of stock (Backorder: %1)\n        }\n        else if (availableQty < this.MinInventQty())\n        {\n            availability = \"⚡ \" + strFmt(\"@SYS325899\", availableQty); // Low stock: %1\n        }\n        else\n        {\n            availability = \"✅ \" + strFmt(\"@SYS325900\", availableQty); // Available: %1\n        }\n        \n        // Cache the result\n        InventTable::inventAvailabilityCache.insert(cacheKey, availability);\n    }\n    catch (Exception::Error)\n    {\n        availability = \"❌ @SYS325901\"; // Error retrieving availability\n        error(\"Error calculating availability for item \" + this.ItemId);\n    }\n    \n    return availability;\n}\n\n// Cache cleanup method (call from form close or periodic job)\nstatic void clearAvailabilityCache()\n{\n    if (InventTable::inventAvailabilityCache)\n    {\n        InventTable::inventAvailabilityCache = null;\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods must be declared with [Display] attribute and return a value, while edit methods use [Edit] attribute and handle both get/set operations through parameter detection",
+        "Method names should follow camelCase convention with descriptive suffixes like 'Display' or 'Edit' to clearly indicate their purpose in the AOT metadata",
+        "Performance is critical since these methods execute frequently during form operations — implement caching strategies for expensive calculations and avoid complex joins in display methods",
+        "Edit methods must handle validation, business logic, and database updates within proper ttsbegin/ttscommit blocks to maintain data integrity",
+        "Use proper error handling with try/catch blocks and meaningful user messages, as exceptions in these methods can crash form operations or leave transactions in inconsistent states"
+      ],
+      "gotchas": [
+        "Never call super() in display/edit methods — they don't inherit from parent classes like regular methods, and calling super() will cause compilation errors or unexpected behavior",
+        "Don't modify the current record's fields directly in display methods — this can cause infinite recursion during form refresh cycles and corrupt the UI state",
+        "Avoid using select statements without proper where clauses in display methods — this can cause severe performance issues when forms load hundreds of records simultaneously"
+      ],
+      "performance_tips": [
+        "Implement intelligent caching strategies using static Map objects or the SysGlobalCache framework for expensive calculations that don't change frequently",
+        "Use exists joins instead of full selects when you only need to check for related record existence, and consider pre-loading related data in form data source init methods"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_tables",
+        "xpp_select"
+      ],
+      "quiz": [
+        {
+          "q": "What happens if you call ttsbegin/ttscommit inside a display method?",
+          "options": [
+            "It improves performance by batching operations",
+            "It's required for data consistency",
+            "It can cause transaction nesting issues and should be avoided",
+            "It automatically caches the display value"
+          ],
+          "answer": 2,
+          "explanation": "Display methods should never contain transaction blocks because they execute during form refresh operations that may already be within transactions, potentially causing nesting issues or performance problems."
+        },
+        {
+          "q": "How does the kernel determine whether an edit method is in 'get' or 'set' mode?",
+          "options": [
+            "By checking a boolean parameter",
+            "By detecting whether parameters are passed and not default",
+            "By using separate getter/setter method pairs",
+            "By examining the return type"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods use parameter detection with prmisDefault() to determine mode - if parameters are passed and not default values, it's set mode; otherwise, it's get mode."
+        },
+        {
+          "q": "Which is the most efficient way to implement a display method that shows related table data?",
+          "options": [
+            "Use a complex join with multiple tables",
+            "Cache the results using a static Map variable",
+            "Perform individual select statements for each field",
+            "Use a view instead of a display method"
+          ],
+          "answer": 1,
+          "explanation": "Caching results using static Map variables is most efficient for display methods because it avoids repeated database queries during form operations, especially when the same data is accessed multiple times."
+        }
+      ]
+    },
+    "generated_date": "2026-05-26",
+    "auto_generated": true
   }
 ]

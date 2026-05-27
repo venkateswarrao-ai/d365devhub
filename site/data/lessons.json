@@ -7577,5 +7577,104 @@
     },
     "generated_date": "2026-05-26",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "18 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "calculated-fields",
+      "ui-layer"
+    ],
+    "summary": "Master display and edit methods to create calculated fields, custom UI logic, and data transformations in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ mechanisms for extending table and form functionality without modifying underlying data structures. Display methods provide calculated, read-only values that appear as virtual fields on forms, while edit methods enable custom input validation and data transformation. These methods are crucial for creating user-friendly interfaces that present business logic-derived data and handle complex user interactions.\n\nIn D365 F&O architecture, display/edit methods bridge the gap between raw database values and meaningful business information. They execute on the client tier for forms and server tier for reports, making them essential for performance-conscious development. Understanding their lifecycle, caching behavior, and proper implementation patterns is critical for building responsive, maintainable applications.\n\nDisplay and edit methods are extensively used throughout standard D365 F&O applications - from customer balance calculations on CustTable to complex pricing logic in sales orders. They enable rich UI experiences while maintaining clean separation between data persistence and presentation logic.",
+      "theory": "Display and edit methods are defined at the table level in the AOT and automatically become available as virtual fields on any form or report that uses the table as a data source. The kernel handles method invocation, caching, and UI synchronization automatically. Display methods return a value for presentation, while edit methods accept user input and perform validation or transformation before updating the underlying record.\n\nThe method signature determines behavior: display methods typically accept no parameters and return primitive types (str, real, int, date, etc.) or extended data types. Edit methods accept a parameter matching their return type and include validation logic. Both methods have access to the current record's buffer via 'this' context, enabling access to all table fields and methods.\n\nCaching is a critical performance consideration. The kernel caches display method results until the record changes, but calling the method directly bypasses cache. Form data sources automatically invalidate cache when records are modified. For expensive calculations, consider implementing explicit caching patterns using class member variables or static maps. The SysFormRun framework provides refresh() methods to force recalculation when needed.\n\nMethod resolution follows inheritance patterns - subclasses can override parent display methods, and the kernel respects table inheritance hierarchies. Extension classes can add new display methods via [ExtensionOf] attributes, enabling customization without modifying base application code.",
+      "code_examples": [
+        {
+          "title": "Customer Balance Display Method",
+          "description": "Real-world display method showing customer account balance with proper error handling and performance considerations",
+          "language": "xpp",
+          "code": "// On CustTable table\n[SysClientCacheDataMethodAttribute(true)]\ndisplay AmountCur customerBalance()\n{\n    CustTrans       custTrans;\n    AmountCur       balance = 0;\n    \n    try\n    {\n        // Use index hint for performance\n        select sum(AmountCur) from custTrans\n            index hint AccountIdx\n            where custTrans.AccountNum == this.AccountNum\n            && custTrans.Voucher != ''\n            && !custTrans.Closed;\n            \n        balance = custTrans.AmountCur;\n    }\n    catch (Exception::Error)\n    {\n        // Log error but don't break form display\n        warning(strFmt(\"Unable to calculate balance for customer %1\", this.AccountNum));\n        balance = 0;\n    }\n    \n    return balance;\n}\n\n// Usage example from form data source\nstatic void demonstrateDisplayMethod(Args _args)\n{\n    CustTable   custTable;\n    AmountCur   balance;\n    \n    select firstOnly custTable\n        where custTable.AccountNum == \"US-001\";\n        \n    if (custTable.RecId)\n    {\n        // Method called automatically by form engine\n        balance = custTable.customerBalance();\n        info(strFmt(\"Customer %1 balance: %2\", \n             custTable.AccountNum, \n             num2Str(balance, 2, 2, 1, 1)));\n    }\n}"
+        },
+        {
+          "title": "Sales Line Tax Amount Edit Method",
+          "description": "Advanced edit method with validation, business logic, and automatic field updates",
+          "language": "xpp",
+          "code": "// On SalesLine table\nedit TaxAmount editTaxAmount(TaxAmount _taxAmount = this.TaxAmount)\n{\n    SalesTable      salesTable;\n    TaxAmount       calculatedTax;\n    Real            taxRate;\n    \n    try\n    {\n        if (_taxAmount < 0)\n        {\n            throw error(\"Tax amount cannot be negative\");\n        }\n        \n        // Validate against maximum allowed tax\n        calculatedTax = TaxCalculation::calcLineTax(this.SalesId, this.LineNum);\n        \n        if (_taxAmount > calculatedTax * 1.1) // 10% tolerance\n        {\n            if (!Box::yesNo(strFmt(\"Tax amount %1 exceeds calculated tax %2. Continue?\",\n                                 num2Str(_taxAmount, 0, 2, 1, 1),\n                                 num2Str(calculatedTax, 0, 2, 1, 1)),\n                          DialogButton::No))\n            {\n                return this.TaxAmount; // Return original value\n            }\n        }\n        \n        // Update the field\n        this.TaxAmount = _taxAmount;\n        \n        // Trigger dependent field calculations\n        this.LineAmount = this.calcLineAmount();\n        \n        // Update header totals if this is part of a form transaction\n        salesTable = SalesTable::find(this.SalesId, true);\n        if (salesTable.RecId)\n        {\n            salesTable.reread();\n            salesTable.calc();\n            salesTable.doUpdate();\n        }\n    }\n    catch (Exception::Error)\n    {\n        // Reset to original value on error\n        return this.TaxAmount;\n    }\n    \n    return this.TaxAmount;\n}\n\n// Helper method for tax calculation\nprivate TaxAmount calcLineTax()\n{\n    TmpTaxWorkTrans     tmpTaxWorkTrans;\n    TaxAmount          totalTax = 0;\n    \n    // Use standard tax engine\n    Tax::calcTax(tmpTaxWorkTrans, this);\n    \n    while select tmpTaxWorkTrans\n    {\n        totalTax += tmpTaxWorkTrans.TaxAmount;\n    }\n    \n    return totalTax;\n}"
+        },
+        {
+          "title": "Inventory Availability Display with Caching",
+          "description": "Performance-optimized display method with intelligent caching and cross-company data access",
+          "language": "xpp",
+          "code": "// On InventTable table - cached inventory availability display\nclass InventTable_Extension\n{\n    private Map availabilityCache;\n    private UtcDateTime lastCacheUpdate;\n    private static final int CACHE_TIMEOUT_MINUTES = 5;\n    \n    [SysClientCacheDataMethodAttribute(true)]\n    display Qty availableInventory()\n    {\n        InventDim           inventDim;\n        InventSum           inventSum;\n        Qty                 available = 0;\n        UtcDateTime         currentTime = DateTimeUtil::utcNow();\n        str                 cacheKey;\n        \n        try\n        {\n            // Initialize cache if needed\n            if (!this.availabilityCache)\n            {\n                this.availabilityCache = new Map(Types::String, Types::Real);\n                this.lastCacheUpdate = currentTime;\n            }\n            \n            cacheKey = strFmt(\"%1_%2\", this.ItemId, this.dataAreaId);\n            \n            // Check cache validity (5 minute timeout)\n            if (this.lastCacheUpdate && \n                DateTimeUtil::getDifference(currentTime, this.lastCacheUpdate) < (CACHE_TIMEOUT_MINUTES * 60))\n            {\n                if (this.availabilityCache.exists(cacheKey))\n                {\n                    return this.availabilityCache.lookup(cacheKey);\n                }\n            }\n            else\n            {\n                // Clear expired cache\n                this.availabilityCache = new Map(Types::String, Types::Real);\n                this.lastCacheUpdate = currentTime;\n            }\n            \n            // Calculate fresh availability\n            inventDim.clear();\n            inventDim.initFromInventTable(this);\n            \n            select sum(PostedQty), sum(ReservedQty) from inventSum\n                where inventSum.ItemId == this.ItemId\n                && inventSum.Closed == NoYes::No\n                exists join inventDim\n                    where inventDim.inventDimId == inventSum.InventDimId;\n                    \n            available = inventSum.PostedQty - inventSum.ReservedQty;\n            \n            // Cache the result\n            this.availabilityCache.insert(cacheKey, available);\n            \n            // Log cache miss for monitoring\n            if (isRunningOnServer())\n            {\n                Info(strFmt(\"Cache miss for item %1 - calculated availability: %2\", \n                     this.ItemId, num2Str(available, 0, 2, 1, 1)));\n            }\n        }\n        catch (Exception::Error)\n        {\n            warning(strFmt(\"Error calculating availability for item %1\", this.ItemId));\n            available = 0;\n        }\n        \n        return available;\n    }\n    \n    // Method to invalidate cache when inventory changes\n    public void invalidateAvailabilityCache()\n    {\n        if (this.availabilityCache)\n        {\n            str cacheKey = strFmt(\"%1_%2\", this.ItemId, this.dataAreaId);\n            this.availabilityCache.remove(cacheKey);\n        }\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods provide calculated read-only values while edit methods handle input validation and transformation — both execute in table context with access to current record buffer",
+        "Method caching is automatic but can be controlled with SysClientCacheDataMethodAttribute — bypass cache with direct method calls when fresh data is required",
+        "Performance is critical since methods execute for every record displayed — use index hints, limit record access, and implement explicit caching for expensive calculations",
+        "Edit methods must handle validation gracefully and return original values on error to prevent data corruption — use try/catch blocks and meaningful error messages",
+        "Extension classes enable adding display/edit methods without code modifications — use [ExtensionOf] pattern for customizations in overlay-free development",
+        "Form data source integration is automatic — display methods appear as fields while edit methods trigger on value changes with full transaction support"
+      ],
+      "gotchas": [
+        "Display methods called in loops bypass caching and cause performance issues — cache results in class variables or use executeQuery pattern to batch calculations",
+        "Edit method validation errors that throw exceptions can corrupt form state — always return the original field value when validation fails instead of throwing errors",
+        "Cross-company queries in display methods fail when company context changes — use changeCompany statement or store company-specific data in method parameters rather than relying on implicit context"
+      ],
+      "performance_tips": [
+        "Use SysClientCacheDataMethodAttribute(true) for expensive display methods and implement manual cache invalidation when underlying data changes",
+        "Minimize database calls in display methods by using exists joins, index hints, and aggregate queries instead of iterating through multiple records"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_forms",
+        "xpp_select",
+        "xpp_classes"
+      ],
+      "quiz": [
+        {
+          "q": "What happens when a display method throws an unhandled exception during form rendering?",
+          "options": [
+            "The form crashes and closes",
+            "The field shows empty and form continues loading",
+            "An infolog error appears but form functionality is preserved",
+            "The entire form datasource becomes readonly"
+          ],
+          "answer": 1,
+          "explanation": "The kernel gracefully handles display method exceptions by showing an empty field value, allowing the form to continue functioning normally. This prevents one bad calculation from breaking the entire user interface."
+        },
+        {
+          "q": "When should you use SysClientCacheDataMethodAttribute(true) on a display method?",
+          "options": [
+            "Always, to improve performance",
+            "Never, caching causes data inconsistency",
+            "Only for expensive calculations that don't change frequently",
+            "Only for methods that access multiple companies"
+          ],
+          "answer": 2,
+          "explanation": "SysClientCacheDataMethodAttribute(true) should be used for expensive calculations that don't change frequently, as it prevents repeated expensive operations but requires manual cache invalidation when underlying data changes."
+        },
+        {
+          "q": "In an edit method, what should you do if validation fails?",
+          "options": [
+            "Throw an error() exception to stop processing",
+            "Return the new invalid value with a warning",
+            "Return the original field value and show user feedback",
+            "Call ttsAbort() to roll back the transaction"
+          ],
+          "answer": 2,
+          "explanation": "Edit methods should return the original field value when validation fails and provide user feedback through warning() or info() messages. Throwing exceptions can corrupt form state and cause unpredictable behavior."
+        }
+      ]
+    },
+    "generated_date": "2026-05-27",
+    "auto_generated": true
   }
 ]

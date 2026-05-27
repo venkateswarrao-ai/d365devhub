@@ -1,5 +1,13 @@
 [
   {
+    "date": "May 27",
+    "tag": "LESSON",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "id": "xpp_display_methods"
+  },
+  {
     "date": "May 26",
     "tag": "LESSON",
     "title": "Display & Edit Methods in X++",
@@ -230,13 +238,5 @@
     "section": "Architecture",
     "level": "Expert",
     "id": "arch_multi_env"
-  },
-  {
-    "date": "Apr 26",
-    "tag": "LESSON",
-    "title": "Azure DevOps ALM for D365 F&O",
-    "section": "Architecture",
-    "level": "Expert",
-    "id": "arch_alm_pipeline"
   }
 ]

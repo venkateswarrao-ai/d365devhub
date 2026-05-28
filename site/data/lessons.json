@@ -7676,5 +7676,101 @@
     },
     "generated_date": "2026-05-27",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "calculated-fields"
+    ],
+    "summary": "Master display and edit methods in X++ to create calculated fields, enable dynamic UI behavior, and implement sophisticated business logic in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable calculated fields and dynamic UI behavior in D365 F&O forms, reports, and data sources. Display methods compute and return values without modifying data, while edit methods allow users to input values that trigger business logic. These methods are crucial for creating rich user experiences where field values depend on complex calculations, data lookups, or business rules that can't be expressed through simple field bindings. Understanding when and how to use display vs edit methods, along with their performance implications, is essential for building responsive and maintainable D365 applications.",
+      "theory": "Display and edit methods in D365 F&O are special X++ methods that integrate seamlessly with the Application Object Tree (AOT) metadata framework. When defined on tables, forms, or data sources, these methods become available as virtual fields that can be bound to form controls, included in queries, and referenced in reports. Display methods are read-only calculated fields that execute on-demand when the UI requests the value, making them ideal for expensive computations that shouldn't run during every record retrieval. Edit methods provide a way to capture user input and translate it into underlying data modifications, often involving complex validation or data transformation logic. The framework automatically handles method caching, invalidation, and refresh cycles through the FormDataSource and FormControl infrastructure. Performance-wise, display methods are cached per record until the cache is invalidated (typically when underlying data changes), while edit methods execute immediately when users modify values. The SysFormRun and FormRun classes coordinate method execution with form lifecycle events.",
+      "code_examples": [
+        {
+          "title": "Table Display Method with Caching",
+          "description": "A display method on CustTable that calculates total outstanding balance with proper caching and error handling",
+          "language": "xpp",
+          "code": "// On CustTable table\n[SysClientCacheDataMethodAttribute(true)]\ndisplay AmountMST totalOutstandingBalance()\n{\n    AmountMST       balance;\n    CustTrans       custTrans;\n    \n    try\n    {\n        // Use exists join for better performance\n        select sum(AmountMST) from custTrans\n            where custTrans.AccountNum == this.AccountNum\n            && custTrans.TransType == CustTransType::Invoice\n            && !custTrans.Closed;\n            \n        balance = custTrans.AmountMST;\n    }\n    catch (Exception::Error)\n    {\n        error(\"Failed to calculate outstanding balance for customer %1\", this.AccountNum);\n        balance = 0;\n    }\n    \n    return balance;\n}\n\n// Usage in form data source method to refresh cache\npublic void refresh()\n{\n    super();\n    // Invalidate display method cache when data changes\n    this.cacheRemoveRecord();\n}"
+        },
+        {
+          "title": "Form Edit Method with Validation",
+          "description": "An edit method that allows users to input a percentage and automatically calculates the corresponding discount amount",
+          "language": "xpp",
+          "code": "// On SalesTable form data source\nedit Percent discountPercent(boolean _set, Percent _discountPercent)\n{\n    SalesLine       salesLine;\n    AmountCur       totalAmount, discountAmount;\n    \n    if (_set)\n    {\n        // Validate input range\n        if (_discountPercent < 0 || _discountPercent > 100)\n        {\n            error(\"Discount percentage must be between 0 and 100\");\n            return this.DiscountPercent;\n        }\n        \n        try\n        {\n            ttsbegin;\n            \n            // Calculate total line amount\n            select sum(LineAmount) from salesLine\n                where salesLine.SalesId == this.SalesId;\n            \n            totalAmount = salesLine.LineAmount;\n            discountAmount = totalAmount * (_discountPercent / 100);\n            \n            // Update header discount\n            this.DiscountPercent = _discountPercent;\n            this.EndDisc = discountAmount;\n            this.update();\n            \n            ttscommit;\n            \n            // Refresh related display methods\n            this.dataSource().refresh();\n            \n            info(strFmt(\"Applied %1%% discount (%2) to sales order %3\", \n                _discountPercent, \n                num2Str(discountAmount, -1, 2, 1, 1),\n                this.SalesId));\n        }\n        catch (Exception::UpdateConflict)\n        {\n            error(\"Sales order was modified by another user. Please refresh and try again.\");\n        }\n    }\n    \n    return this.DiscountPercent;\n}\n\n// Display method to show calculated discount amount\n[SysClientCacheDataMethodAttribute(true)]\ndisplay AmountCur calculatedDiscountAmount()\n{\n    return this.EndDisc;\n}"
+        },
+        {
+          "title": "Advanced Display Method with Cross-Company Logic",
+          "description": "A complex display method that aggregates data across companies with proper security and performance optimization",
+          "language": "xpp",
+          "code": "// On VendTable form data source\n[SysClientCacheDataMethodAttribute(true)]\ndisplay AmountMST totalPurchaseAcrossCompanies()\n{\n    AmountMST           totalAmount;\n    VendTrans           vendTrans;\n    DataAreaId          currentCompany;\n    Set                 allowedCompanies;\n    SetEnumerator       companyEnum;\n    \n    try\n    {\n        // Get companies user has access to\n        allowedCompanies = SecurityRights::getCompaniesForUser(curUserId());\n        companyEnum = allowedCompanies.getEnumerator();\n        \n        currentCompany = curExt();\n        \n        while (companyEnum.moveNext())\n        {\n            changecompany(companyEnum.current())\n            {\n                // Use index hint for better performance\n                select sum(AmountMST) from vendTrans\n                    index hint VendTransIdx\n                    where vendTrans.AccountNum == this.AccountNum\n                    && vendTrans.TransDate >= dateStartYear(systemDateGet())\n                    && vendTrans.TransType == LedgerTransType::Purch;\n                    \n                totalAmount += vendTrans.AmountMST;\n            }\n        }\n        \n        // Restore original company context\n        changecompany(currentCompany)\n        {\n            // Context restored\n        }\n    }\n    catch (Exception::Error)\n    {\n        warning(\"Could not calculate cross-company purchase total for vendor %1\", this.AccountNum);\n        totalAmount = 0;\n    }\n    \n    return totalAmount;\n}\n\n// Method to invalidate cache when vendor data changes\npublic void write()\n{\n    super();\n    \n    // Clear display method cache across all form data sources\n    FormRun formRun = this.dataSource().formRun();\n    formRun.dataSource().cacheRemoveRecord();\n}"
+        }
+      ],
+      "key_points": [
+        "Use SysClientCacheDataMethodAttribute(true) on display methods to enable automatic caching and improve performance",
+        "Edit methods must always validate input parameters and handle the _set parameter correctly for proper two-way data binding",
+        "Display methods execute on-demand when UI controls request values, not during every record fetch operation",
+        "Call cacheRemoveRecord() on data sources when underlying data changes to invalidate display method caches",
+        "Edit methods should wrap database operations in ttsbegin/ttscommit blocks and include proper error handling"
+      ],
+      "gotchas": [
+        "Forgetting to handle the _set parameter in edit methods causes values to not persist — always check if (_set) before processing input",
+        "Display methods without SysClientCacheDataMethodAttribute execute every time they're accessed, causing severe performance issues in grids",
+        "Using select statements in display methods without proper indexing creates N+1 query problems — always verify execution plans and use index hints when needed"
+      ],
+      "performance_tips": [
+        "Use exists joins instead of select sum() in display methods when you only need to check for data existence rather than calculate totals",
+        "Implement bulk caching strategies by prefetching related data in form init() or executeQuery() methods rather than lazy-loading in individual display methods"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_forms",
+        "xpp_caching"
+      ],
+      "quiz": [
+        {
+          "q": "What happens if you don't include the SysClientCacheDataMethodAttribute on a display method used in a form grid?",
+          "options": [
+            "The method won't compile",
+            "The method executes every time a cell is displayed, causing performance issues",
+            "The method returns null values",
+            "The method only works in debug mode"
+          ],
+          "answer": 1,
+          "explanation": "Without caching, display methods execute every time the UI requests the value, which in grids means potentially hundreds of executions as users scroll. This causes severe performance degradation."
+        },
+        {
+          "q": "In an edit method, what should you do if the _set parameter is false?",
+          "options": [
+            "Return the current value without processing",
+            "Throw an exception",
+            "Process the input value anyway",
+            "Return null"
+          ],
+          "answer": 0,
+          "explanation": "When _set is false, the UI is requesting the current value (getter behavior). You should return the existing value without processing any input. Only when _set is true should you validate and process the input parameter."
+        },
+        {
+          "q": "When should you call cacheRemoveRecord() on a form data source?",
+          "options": [
+            "Only when the form opens",
+            "Every time a display method executes",
+            "When underlying data changes that affects display method results",
+            "Never, the framework handles it automatically"
+          ],
+          "answer": 2,
+          "explanation": "You need to manually invalidate the display method cache when underlying data changes that would affect the computed values. The framework doesn't automatically detect when external data changes impact display method results."
+        }
+      ]
+    },
+    "generated_date": "2026-05-28",
+    "auto_generated": true
   }
 ]

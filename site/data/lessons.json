@@ -7772,5 +7772,101 @@
     },
     "generated_date": "2026-05-28",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "15 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "calculated-fields",
+      "ui-binding"
+    ],
+    "summary": "Master display and edit methods in X++ to create calculated fields, custom UI behaviors, and dynamic data presentation in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable calculated fields, dynamic UI behaviors, and custom data presentation without modifying underlying table structures. Display methods provide read-only computed values, while edit methods allow controlled editing of calculated or derived data. These methods are extensively used in standard D365 F&O forms like CustTable, VendTable, and InventTable to show formatted data, calculated totals, and contextual information.\n\nUnlike simple field bindings, display and edit methods execute custom X++ logic every time they're called, making them powerful tools for real-time calculations, data formatting, and business rule enforcement. They're essential for creating professional user interfaces that present data in meaningful ways without compromising data integrity or requiring complex form customizations.",
+      "theory": "Display and edit methods are declared with the 'display' and 'edit' keywords respectively, followed by the return type and method signature. The X++ compiler automatically generates metadata that allows these methods to be bound to form controls, report fields, and other UI elements through the AOT. When bound to form controls, the framework calls these methods during form refresh cycles, passing the current record context.\n\nThe SysTableBrowser class and FormDataSource framework handle the automatic invocation of these methods during UI operations. Display methods are called during form refresh, record navigation, and field updates, while edit methods are invoked when users attempt to edit the bound control. The return value becomes the displayed/editable value in the UI. These methods have access to the current record buffer through the 'this' pointer when declared on table classes, or through method parameters when declared on form classes. The caching behavior is controlled by the framework - display methods are typically cached per refresh cycle unless invalidated by record changes or explicit cache clearing.",
+      "code_examples": [
+        {
+          "title": "Basic Display Method on Table",
+          "description": "Creating a display method on CustTable to show formatted credit limit with currency",
+          "language": "xpp",
+          "code": "// On CustTable table class\n[SysClientCacheDataMethodAttribute(true)]\ndisplay Amount displayCreditLimitFormatted()\n{\n    CurrencyCode currencyCode;\n    Amount formattedAmount;\n    \n    try\n    {\n        // Get customer's currency\n        currencyCode = this.Currency ? this.Currency : CompanyInfo::standardCurrency();\n        \n        // Format amount with currency\n        formattedAmount = this.CreditMax;\n        \n        return formattedAmount;\n    }\n    catch (Exception::Error)\n    {\n        // Return zero on error\n        return 0.0;\n    }\n}\n\n// Usage: Bind this method to a form control\n// Control properties: Data Source = CustTable, Data Method = displayCreditLimitFormatted"
+        },
+        {
+          "title": "Edit Method with Validation",
+          "description": "Edit method allowing controlled editing of calculated discount percentage with business rule validation",
+          "language": "xpp",
+          "code": "// On SalesTable table class\nedit Percent editCustomDiscountPct(boolean _set = false, Percent _discountPct = 0)\n{\n    Percent currentDiscount;\n    Percent maxAllowedDiscount;\n    \n    if (_set)\n    {\n        try\n        {\n            // Get maximum allowed discount from customer\n            maxAllowedDiscount = CustTable::find(this.CustAccount).MaxCashDisc;\n            \n            // Validate discount percentage\n            if (_discountPct > maxAllowedDiscount)\n            {\n                throw error(strFmt(\"@SYS25439\", maxAllowedDiscount)); // \"Discount cannot exceed %1%\"\n            }\n            \n            if (_discountPct < 0)\n            {\n                throw error(\"@SYS25440\"); // \"Discount cannot be negative\"\n            }\n            \n            ttsbegin;\n            \n            // Update related discount fields\n            this.CashDiscPercent = _discountPct;\n            this.CashDiscAmount = this.NetAmount * _discountPct / 100;\n            \n            // Recalculate totals\n            this.calcTotals();\n            \n            ttscommit;\n            \n            info(strFmt(\"Discount updated to %1%\", _discountPct));\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            throw;\n        }\n    }\n    \n    // Return current discount percentage\n    currentDiscount = this.NetAmount ? (this.CashDiscAmount / this.NetAmount) * 100 : 0;\n    \n    return currentDiscount;\n}"
+        },
+        {
+          "title": "Form-Level Display Method with Cross-Reference",
+          "description": "Display method on form showing aggregated data from related tables with proper error handling",
+          "language": "xpp",
+          "code": "// On SalesTableListPage form class\npublic class FormRun extends ListPageRun\n{\n    [SysClientCacheDataMethodAttribute(true)]\n    display Integer displayOpenOrderLines()\n    {\n        SalesTable salesTable;\n        SalesLine salesLine;\n        Integer lineCount;\n        \n        try\n        {\n            salesTable = SalesTable_ds.cursor();\n            \n            if (!salesTable.RecId)\n            {\n                return 0;\n            }\n            \n            // Count open sales lines efficiently\n            select count(RecId) from salesLine\n                where salesLine.SalesId == salesTable.SalesId\n                   && salesLine.SalesStatus == SalesStatus::Backorder;\n            \n            lineCount = salesLine.RecId;\n        }\n        catch (Exception::Error)\n        {\n            // Log error for debugging\n            error(\"Error calculating open order lines\");\n            lineCount = 0;\n        }\n        \n        return lineCount;\n    }\n    \n    // Display method for calculated delivery status\n    [SysClientCacheDataMethodAttribute(true)]\n    display str displayDeliveryStatus()\n    {\n        SalesTable salesTable;\n        str status;\n        TransDateTime earliestShipDate;\n        TransDateTime latestShipDate;\n        \n        salesTable = SalesTable_ds.cursor();\n        \n        if (!salesTable.RecId)\n        {\n            return \"\";\n        }\n        \n        try\n        {\n            // Get delivery date range from lines\n            select minof(ShippingDateRequested), maxof(ShippingDateRequested) from salesLine\n                where salesLine.SalesId == salesTable.SalesId\n                   && salesLine.SalesStatus != SalesStatus::Canceled;\n            \n            earliestShipDate = salesLine.ShippingDateRequested;\n            latestShipDate = salesLine.ShippingDateRequested;\n            \n            if (earliestShipDate == latestShipDate)\n            {\n                status = strFmt(\"Single delivery: %1\", DateTimeUtil::toStr(earliestShipDate));\n            }\n            else\n            {\n                status = strFmt(\"Multiple deliveries: %1 - %2\", \n                               DateTimeUtil::toStr(earliestShipDate),\n                               DateTimeUtil::toStr(latestShipDate));\n            }\n        }\n        catch\n        {\n            status = \"Delivery dates unavailable\";\n        }\n        \n        return status;\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods are read-only and automatically called during form refresh cycles — use SysClientCacheDataMethodAttribute(true) for client-side caching",
+        "Edit methods require both get and set logic using boolean _set parameter — validate business rules before updating data",
+        "Table-level methods have direct access to 'this' record buffer, while form-level methods access data through datasource cursors",
+        "Use ttsbegin/ttscommit in edit methods when modifying multiple fields to maintain data consistency",
+        "Method signatures must match expected patterns: 'display ReturnType methodName()' and 'edit ReturnType methodName(boolean _set, ReturnType _value)'"
+      ],
+      "gotchas": [
+        "Display methods are called frequently during UI operations — avoid expensive operations like complex joins or file I/O without proper caching",
+        "Edit methods without proper validation can corrupt data — always validate input parameters and use try/catch blocks around database operations",
+        "Forgetting the _set parameter in edit methods causes compilation errors — the framework expects this signature for proper binding to form controls"
+      ],
+      "performance_tips": [
+        "Use SysClientCacheDataMethodAttribute(true) on display methods that don't change frequently to reduce server round-trips",
+        "Minimize database queries in display methods by using joins instead of multiple selects, and consider caching results at the form level"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_classes",
+        "forms_development"
+      ],
+      "quiz": [
+        {
+          "q": "What is the correct signature for an edit method that handles a Percent return type?",
+          "options": [
+            "edit Percent methodName(Percent _value)",
+            "edit Percent methodName(boolean _set, Percent _value = 0)",
+            "display Percent methodName(boolean _edit)",
+            "edit void methodName(Percent _value)"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods require a boolean _set parameter to distinguish between get and set operations, followed by the value parameter with a default value. The return type must match the data type being edited."
+        },
+        {
+          "q": "When should you use SysClientCacheDataMethodAttribute(true) on a display method?",
+          "options": [
+            "Always for better performance",
+            "Never, it causes data inconsistency",
+            "When the displayed data changes infrequently and is expensive to calculate",
+            "Only on table-level display methods"
+          ],
+          "answer": 2,
+          "explanation": "SysClientCacheDataMethodAttribute(true) should be used when the displayed data is expensive to calculate and doesn't change frequently, as it caches the result on the client side to reduce server round-trips."
+        },
+        {
+          "q": "What happens if a display method throws an unhandled exception?",
+          "options": [
+            "The form continues normally with empty values",
+            "The entire form operation is aborted",
+            "The method returns null automatically",
+            "The framework displays a generic error message"
+          ],
+          "answer": 1,
+          "explanation": "Unhandled exceptions in display methods will abort the entire form operation and display an error to the user. This is why proper try/catch blocks are essential in production display methods."
+        }
+      ]
+    },
+    "generated_date": "2026-05-29",
+    "auto_generated": true
   }
 ]

@@ -1,5 +1,13 @@
 [
   {
+    "date": "May 29",
+    "tag": "LESSON",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "id": "xpp_display_methods"
+  },
+  {
     "date": "May 28",
     "tag": "LESSON",
     "title": "Display & Edit Methods in X++",
@@ -230,13 +238,5 @@
     "section": "Agentic AI",
     "level": "Expert",
     "id": "ai_langchain_d365"
-  },
-  {
-    "date": "Apr 28",
-    "tag": "LESSON",
-    "title": "LCS: Lifecycle Services Deep Dive",
-    "section": "Architecture",
-    "level": "Expert",
-    "id": "arch_lcs_lifecycle"
   }
 ]

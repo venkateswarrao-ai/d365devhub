@@ -7868,5 +7868,102 @@
     },
     "generated_date": "2026-05-29",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "18 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "table-extensions",
+      "ui-binding"
+    ],
+    "summary": "Master display and edit methods in X++ to create calculated fields, format data presentation, and enable dynamic UI behaviors in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable dynamic data presentation and manipulation in D365 F&O user interfaces. Display methods provide read-only calculated values that appear as virtual fields on forms, while edit methods allow users to input data that gets processed and stored in underlying table fields. These methods are essential for creating rich, interactive user experiences without modifying core table structures.\n\nUnlike database fields, display/edit methods execute at runtime on the client or server tier, making them perfect for calculations, formatting, lookups, and data transformations. They're commonly used for showing derived values like totals, status indicators, formatted strings, or cross-table lookups. Understanding their execution context, caching behavior, and performance implications is crucial for building responsive enterprise applications.\n\nModern D365 development leverages these methods through table extensions, form extensions, and data entities, maintaining upgrade safety while extending standard functionality. They integrate seamlessly with the form binding framework, data sources, and reporting engines, making them indispensable tools for customizing D365 F&O without core modifications.",
+      "theory": "Display and edit methods operate within D365's metadata-driven UI framework, where the kernel automatically discovers and binds these methods to form controls based on naming conventions. When a method is prefixed with 'display' or 'edit', the Application Object Tree (AOT) recognizes it as a UI-bindable method, making it available in form data source field lists and report designs.\n\nThe execution model differs significantly from regular methods. Display methods are called on-demand when forms refresh or when specific records become visible, with automatic caching at the record level. The kernel manages this cache through the Common.displayCache() mechanism, which stores method results per record instance. Edit methods follow a two-phase pattern: the display phase shows current values, while the edit phase processes user input through implicit setter behavior.\n\nTable inheritance affects method resolution through the standard X++ virtual method dispatch. When display/edit methods exist on parent tables like CustTable, they're automatically available on child classes and extensions. The SysTableBrowser class demonstrates advanced usage, dynamically discovering and invoking display methods for generic record viewing. FormDataSource.executeQuery() triggers display method recalculation, while FormDataSource.research() preserves cached values for performance.\n\nThe metadata framework integrates display/edit methods with data entities through the Data Management Framework (DMF). When data entities include these methods, they become available for OData exports, Excel integration, and external system synchronization. The QueryRun framework also supports display methods in reporting scenarios, though performance considerations become critical for large datasets due to row-by-row execution.",
+      "code_examples": [
+        {
+          "title": "Basic Display Method on Table Extension",
+          "description": "Demonstrates a display method that calculates customer credit limit utilization percentage with proper error handling and null checks",
+          "language": "xpp",
+          "code": "[ExtensionOf(tableStr(CustTable))]\nfinal class CustTable_Extension\n{\n    /// <summary>\n    /// Calculates credit limit utilization as a percentage\n    /// </summary>\n    /// <returns>Credit utilization percentage (0-100)</returns>\n    display CreditUtilizationPct creditUtilization()\n    {\n        Real utilizationPct = 0;\n        CustTrans custTrans;\n        AmountMST totalBalance = 0;\n        \n        try\n        {\n            if (this.CreditMax == 0)\n            {\n                return 0;\n            }\n            \n            // Calculate total outstanding balance\n            select sum(AmountCur) from custTrans\n                where custTrans.AccountNum == this.AccountNum\n                   && custTrans.TransType != LedgerTransType::EndingBalance;\n            \n            totalBalance = custTrans.AmountCur;\n            utilizationPct = (totalBalance / this.CreditMax) * 100;\n            \n            return max(0, utilizationPct);\n        }\n        catch (Exception::Error)\n        {\n            error(\"Error calculating credit utilization for customer \" + this.AccountNum);\n            return 0;\n        }\n    }\n    \n    /// <summary>\n    /// Display method for formatted customer status with icon\n    /// </summary>\n    display CustomerStatusDisplay customerStatusFormatted()\n    {\n        str statusText;\n        \n        switch (this.Blocked)\n        {\n            case CustVendorBlocked::No:\n                statusText = \"🟢 Active\";\n                break;\n            case CustVendorBlocked::Invoice:\n                statusText = \"🟡 Invoice Hold\";\n                break;\n            case CustVendorBlocked::All:\n                statusText = \"🔴 Blocked\";\n                break;\n            case CustVendorBlocked::Never:\n                statusText = \"⭕ Never\";\n                break;\n            default:\n                statusText = \"❓ Unknown\";\n                break;\n        }\n        \n        return statusText;\n    }\n}"
+        },
+        {
+          "title": "Edit Method with Complex Business Logic",
+          "description": "Shows an edit method that handles user input for batch quantity allocation with validation and automatic distribution logic",
+          "language": "xpp",
+          "code": "[ExtensionOf(tableStr(InventTrans))]\nfinal class InventTrans_Extension\n{\n    /// <summary>\n    /// Edit method for batch quantity allocation\n    /// Allows users to specify quantity and auto-distributes to available batches\n    /// </summary>\n    edit InventQty batchQtyAllocation(boolean _set = false, InventQty _qty = 0)\n    {\n        InventQty currentQty, remainingQty;\n        InventBatch inventBatch;\n        InventSum inventSum;\n        InventDim inventDim;\n        \n        if (_set)\n        {\n            // Setter logic - distribute quantity across available batches\n            ttsbegin;\n            try\n            {\n                remainingQty = _qty;\n                \n                // Clear existing allocations\n                delete_from inventTrans\n                    where inventTrans.InventTransOrigin == this.InventTransOrigin\n                       && inventTrans.StatusReceipt == StatusReceipt::None;\n                \n                if (remainingQty > 0)\n                {\n                    // Find available batches with FEFO logic\n                    while select inventBatch\n                        order by inventBatch.ProdDate asc\n                        join inventSum\n                        where inventSum.ItemId == this.ItemId\n                           && inventSum.InventDimId == inventBatch.inventDimId()\n                           && inventSum.PhysicalInvent > 0\n                    {\n                        InventQty batchQty = min(remainingQty, inventSum.PhysicalInvent);\n                        \n                        if (batchQty > 0)\n                        {\n                            // Create allocation record\n                            InventTrans allocTrans;\n                            allocTrans.clear();\n                            allocTrans.initValue();\n                            allocTrans.InventTransOrigin = this.InventTransOrigin;\n                            allocTrans.ItemId = this.ItemId;\n                            allocTrans.Qty = -batchQty; // Negative for allocation\n                            allocTrans.InventDimId = inventBatch.inventDimId();\n                            allocTrans.StatusIssue = StatusIssue::ReservPhysical;\n                            allocTrans.insert();\n                            \n                            remainingQty -= batchQty;\n                            \n                            if (remainingQty <= 0)\n                            {\n                                break;\n                            }\n                        }\n                    }\n                }\n                \n                if (remainingQty > 0)\n                {\n                    warning(strFmt(\"Could not allocate %1 units - insufficient batch inventory\", remainingQty));\n                }\n                \n                ttscommit;\n            }\n            catch (Exception::Error)\n            {\n                ttsabort;\n                error(\"Failed to allocate batch quantities\");\n                return 0;\n            }\n        }\n        \n        // Getter logic - return current total allocated quantity\n        select sum(Qty) from inventTrans\n            where inventTrans.InventTransOrigin == this.InventTransOrigin\n               && inventTrans.StatusReceipt == StatusReceipt::None;\n        \n        return abs(inventTrans.Qty);\n    }\n    \n    /// <summary>\n    /// Display method showing batch allocation details\n    /// </summary>\n    display BatchAllocationDetails batchAllocationSummary()\n    {\n        InventTrans allocTrans;\n        InventDim inventDim;\n        str summary = \"\";\n        int batchCount = 0;\n        \n        while select allocTrans\n            join inventDim\n            where allocTrans.InventTransOrigin == this.InventTransOrigin\n               && allocTrans.StatusReceipt == StatusReceipt::None\n               && inventDim.inventDimId == allocTrans.InventDimId\n               && inventDim.InventBatchId\n        {\n            if (batchCount > 0)\n            {\n                summary += \"; \";\n            }\n            \n            summary += strFmt(\"%1: %2\", inventDim.InventBatchId, abs(allocTrans.Qty));\n            batchCount++;\n            \n            if (batchCount >= 3) // Limit display length\n            {\n                summary += \"...\";\n                break;\n            }\n        }\n        \n        return summary ? summary : \"No allocations\";\n    }\n}"
+        },
+        {
+          "title": "Performance-Optimized Display Methods with Caching",
+          "description": "Advanced example showing proper caching techniques and server-side execution for display methods that perform expensive calculations",
+          "language": "xpp",
+          "code": "[ExtensionOf(tableStr(SalesTable))]\nfinal class SalesTable_Extension\n{\n    private Map displayMethodCache;\n    \n    /// <summary>\n    /// Cached display method for sales order profitability analysis\n    /// </summary>\n    display ProfitMarginPct profitMargin()\n    {\n        str cacheKey = \"ProfitMargin\";\n        ProfitMarginPct cachedValue;\n        \n        // Check cache first\n        if (!this.displayMethodCache)\n        {\n            this.displayMethodCache = new Map(Types::String, Types::Real);\n        }\n        \n        if (this.displayMethodCache.exists(cacheKey))\n        {\n            return this.displayMethodCache.lookup(cacheKey);\n        }\n        \n        // Calculate profit margin with server-side execution\n        cachedValue = this.calculateProfitMarginServer();\n        \n        // Cache the result\n        this.displayMethodCache.insert(cacheKey, cachedValue);\n        \n        return cachedValue;\n    }\n    \n    /// <summary>\n    /// Server method for profit margin calculation\n    /// </summary>\n    private server ProfitMarginPct calculateProfitMarginServer()\n    {\n        SalesLine salesLine;\n        InventTable inventTable;\n        InventTableModule inventTableModule;\n        AmountMST totalRevenue = 0;\n        AmountMST totalCost = 0;\n        ProfitMarginPct marginPct = 0;\n        \n        try\n        {\n            while select salesLine\n                join inventTable\n                    where inventTable.ItemId == salesLine.ItemId\n                join inventTableModule\n                    where inventTableModule.ItemId == inventTable.ItemId\n                       && inventTableModule.ModuleType == ModuleInventPurchSales::Purch\n                where salesLine.SalesId == this.SalesId\n                   && salesLine.SalesStatus != SalesStatus::Canceled\n            {\n                AmountMST lineRevenue = salesLine.calcLineAmountExclTax();\n                AmountMST lineCost = salesLine.InventQty * inventTableModule.Price;\n                \n                totalRevenue += lineRevenue;\n                totalCost += lineCost;\n            }\n            \n            if (totalRevenue != 0)\n            {\n                marginPct = ((totalRevenue - totalCost) / totalRevenue) * 100;\n            }\n        }\n        catch (Exception::Error)\n        {\n            error(\"Error calculating profit margin for sales order \" + this.SalesId);\n            marginPct = 0;\n        }\n        \n        return marginPct;\n    }\n    \n    /// <summary>\n    /// Clears display method cache when order is modified\n    /// </summary>\n    public void update()\n    {\n        super();\n        \n        // Clear cache on update\n        if (this.displayMethodCache)\n        {\n            this.displayMethodCache = null;\n        }\n    }\n    \n    /// <summary>\n    /// Display method with conditional server execution\n    /// </summary>\n    display str deliveryPerformance()\n    {\n        str performance;\n        \n        // Execute on server for data-intensive operations\n        if (isConfigurationkeyEnabled(configurationkeyNum(LogisticsAdvanced)))\n        {\n            performance = this.calculateDeliveryPerformanceServer();\n        }\n        else\n        {\n            performance = \"Advanced logistics required\";\n        }\n        \n        return performance;\n    }\n    \n    private server str calculateDeliveryPerformanceServer()\n    {\n        SalesLine salesLine;\n        int totalLines = 0;\n        int onTimeLines = 0;\n        date requestedDate, confirmedDate;\n        \n        select count(RecId) from salesLine\n            where salesLine.SalesId == this.SalesId;\n        totalLines = salesLine.RecId;\n        \n        while select salesLine\n            where salesLine.SalesId == this.SalesId\n        {\n            requestedDate = salesLine.RequestedReceiptDate;\n            confirmedDate = salesLine.ConfirmedDlv;\n            \n            if (confirmedDate && confirmedDate <= requestedDate)\n            {\n                onTimeLines++;\n            }\n        }\n        \n        if (totalLines > 0)\n        {\n            Real performancePct = (real2int(onTimeLines) / real2int(totalLines)) * 100;\n            return strFmt(\"%1% (%2/%3)\", decround(performancePct, 1), onTimeLines, totalLines);\n        }\n        \n        return \"No deliveries\";\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods must be prefixed with 'display' and return calculated read-only values, while edit methods use 'edit' prefix and support both getter/setter patterns through boolean parameter",
+        "Method results are automatically cached per record instance by the kernel's displayCache() mechanism — cache is cleared on record refresh, form requery, or explicit cache invalidation",
+        "Server-side execution using 'server' modifier improves performance for data-intensive calculations by reducing client-server round trips and leveraging database proximity",
+        "Return types must match expected data types for UI binding — use proper EDT types like AmountMST, Qty, Name, etc. for consistent formatting and validation",
+        "Methods execute on-demand when forms refresh or records become visible, making them ideal for calculated fields but requiring performance consideration for expensive operations"
+      ],
+      "gotchas": [
+        "Never call ttsbegin/ttscommit inside display methods — they should be read-only operations, and transaction blocks can cause deadlocks and performance issues in form binding scenarios",
+        "Avoid complex queries in display methods without caching — they execute for every visible record and can cause severe performance degradation on large datasets, use server-side execution and explicit caching instead",
+        "Don't rely on form context within table display methods — these methods can be called from data entities, reports, or other contexts where form-specific objects like element() are undefined, causing runtime errors"
+      ],
+      "performance_tips": [
+        "Implement explicit caching using class member variables or Map containers for expensive calculations, and clear cache in update() or write() methods to maintain data consistency",
+        "Use server-side execution modifier for database-intensive display methods to reduce network traffic and improve response times, especially when accessing multiple related tables or performing aggregations"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_classes",
+        "form_extensions"
+      ],
+      "quiz": [
+        {
+          "q": "When does the D365 kernel automatically clear the display method cache for a record?",
+          "options": [
+            "Only when the record is explicitly saved to the database",
+            "When FormDataSource.executeQuery() is called or the record is refreshed",
+            "Every time the display method is called regardless of context",
+            "Only when the user manually refreshes the browser page"
+          ],
+          "answer": 1,
+          "explanation": "The kernel automatically clears display method cache when FormDataSource.executeQuery() is called, when records are refreshed, or when the record is modified. This ensures calculated values stay synchronized with underlying data changes."
+        },
+        {
+          "q": "What is the correct pattern for implementing an edit method that processes user input?",
+          "options": [
+            "Use a boolean parameter to detect set operations and handle both getter/setter logic in one method",
+            "Create separate getter and setter methods with different names",
+            "Always return void and use global variables to store values",
+            "Only implement setter logic since getter values come from database fields"
+          ],
+          "answer": 0,
+          "explanation": "Edit methods use a boolean parameter (_set) to distinguish between getter and setter operations. When _set is true, process the input value; when false, return the current calculated value. This single-method pattern is required for proper form binding."
+        },
+        {
+          "q": "Why should you avoid transaction blocks (ttsbegin/ttscommit) inside display methods?",
+          "options": [
+            "Transaction blocks are not supported in X++ syntax within display methods",
+            "They can cause deadlocks and performance issues since display methods execute frequently during form operations",
+            "Transaction blocks automatically invalidate the display method cache",
+            "Display methods always run in read-only database mode where transactions are disabled"
+          ],
+          "answer": 1,
+          "explanation": "Transaction blocks in display methods can cause deadlocks and severe performance problems because display methods execute frequently as users navigate forms. They should be read-only operations that don't modify data or hold database locks."
+        }
+      ]
+    },
+    "generated_date": "2026-05-30",
+    "auto_generated": true
   }
 ]

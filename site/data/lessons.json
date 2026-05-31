@@ -7965,5 +7965,102 @@
     },
     "generated_date": "2026-05-30",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "tables",
+      "computed-fields"
+    ],
+    "summary": "Learn how to create calculated fields using display and edit methods for dynamic data presentation and data entry in D365 F&O forms.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ mechanisms for creating computed fields that appear seamlessly alongside regular table fields in forms, reports, and queries. Display methods calculate and return values dynamically without storing them in the database, while edit methods allow users to input data that triggers custom business logic. These methods are essential for scenarios like concatenating name fields, calculating totals, formatting data, or providing user-friendly input mechanisms for complex operations. Understanding display and edit methods is crucial for creating intuitive user interfaces and implementing business logic that extends beyond static table structures in D365 F&O applications.",
+      "theory": "Display and edit methods are table methods decorated with specific attributes that integrate with the kernel's form binding system. When the kernel renders a form control bound to a display method, it automatically calls the method to retrieve the value, passing the current record as context. The SysTableBrowser framework and form data sources leverage reflection to discover these methods through the DictTable and DictMethod classes. Display methods must return a value and should be lightweight since they're called frequently during form refreshes. Edit methods accept an input parameter and typically validate or transform data before updating related fields. Both method types support caching through the Common.displayOption() mechanism and can be overridden in derived tables. The kernel maintains a display method cache per record to avoid redundant calculations, but this cache is invalidated when the record is modified. Performance-critical display methods should implement their own caching strategy using static variables or the Global class for cross-session persistence.",
+      "code_examples": [
+        {
+          "title": "Basic Display Method Implementation",
+          "description": "A complete display method showing concatenated customer name with proper caching and error handling",
+          "language": "xpp",
+          "code": "// On CustTable table\n[SysClientCacheDataMethodAttribute(true)]\ndisplay CustName displayFullName()\n{\n    CustName    fullName;\n    \n    try\n    {\n        // Check if display method cache is available\n        if (this.displayOption() == DisplayOption::ForDisplay)\n        {\n            // Use cached value if available\n            fullName = this.displayCache().parmValue(tableMethodStr(CustTable, displayFullName));\n            if (fullName)\n            {\n                return fullName;\n            }\n        }\n        \n        // Calculate full name\n        fullName = strFmt('%1, %2', this.Name ? this.Name : this.AccountNum, \n                         this.DirPartyTable::name());\n        \n        // Cache the result\n        if (this.displayOption() == DisplayOption::ForDisplay)\n        {\n            this.displayCache().parmValue(tableMethodStr(CustTable, displayFullName), fullName);\n        }\n        \n        return fullName;\n    }\n    catch (Exception::Error)\n    {\n        return this.AccountNum; // Fallback to account number\n    }\n}\n\n// Usage in form datasource method\npublic void executeQuery()\n{\n    super();\n    // Display methods are automatically called when form refreshes\n    info(strFmt('Query completed with %1 records', this.getFirst().RecId ? 1 : 0));\n}"
+        },
+        {
+          "title": "Advanced Edit Method with Business Logic",
+          "description": "Edit method for setting credit limit with validation, workflow integration, and audit trail",
+          "language": "xpp",
+          "code": "// On CustTable table\nedit CreditMax editCreditLimit(boolean _set = false, CreditMax _creditLimit = 0)\n{\n    CustCreditLimitHistory  historyRecord;\n    NumberSeq              numberSeq;\n    \n    if (_set)\n    {\n        try\n        {\n            ttsbegin;\n            \n            // Validate new credit limit\n            if (_creditLimit < 0)\n            {\n                throw error(\"@SYS318447\"); // Credit limit cannot be negative\n            }\n            \n            // Check authorization for large credit limits\n            if (_creditLimit > 100000 && !SecurityRights::hasMenuItemAccess(\n                menuItemActionStr(CustTableListPage), MenuItemType::Action))\n            {\n                throw error(\"Insufficient privileges for credit limit above 100,000\");\n            }\n            \n            // Create audit trail record\n            if (this.CreditMax != _creditLimit)\n            {\n                historyRecord.clear();\n                historyRecord.initValue();\n                historyRecord.AccountNum = this.AccountNum;\n                historyRecord.OldCreditLimit = this.CreditMax;\n                historyRecord.NewCreditLimit = _creditLimit;\n                historyRecord.ModifiedDateTime = DateTimeUtil::getSystemDateTime();\n                historyRecord.ModifiedBy = curUserId();\n                \n                numberSeq = NumberSeq::newGetNum(CustParameters::numRefCreditLimitHistory());\n                historyRecord.RecId = numberSeq.num();\n                historyRecord.insert();\n                \n                // Update the actual field\n                this.CreditMax = _creditLimit;\n                \n                // Trigger workflow if configured\n                if (CustParameters::find().WorkflowCreditLimitEnabled)\n                {\n                    CustCreditLimitWorkflow::submitToWorkflow(this, historyRecord.RecId);\n                }\n                \n                info(strFmt(\"Credit limit updated from %1 to %2\", \n                    this.CreditMax, _creditLimit));\n            }\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            error(\"Failed to update credit limit\");\n            return this.CreditMax; // Return current value on error\n        }\n    }\n    \n    return this.CreditMax;\n}\n\n// Form control method to use edit method\npublic boolean modified()\n{\n    boolean ret = super();\n    \n    if (ret)\n    {\n        // Call edit method with new value\n        custTable_ds.cursor().editCreditLimit(true, this.valueStr());\n        custTable_ds.refresh();\n    }\n    \n    return ret;\n}"
+        },
+        {
+          "title": "Display Method with Complex Calculations and Performance Optimization",
+          "description": "Performance-optimized display method calculating total sales with intelligent caching and cross-company data",
+          "language": "xpp",
+          "code": "// On CustTable table  \n[SysClientCacheDataMethodAttribute(true)]\ndisplay AmountMST displayTotalSalesYTD()\n{\n    AmountMST           totalSales;\n    CustTrans           custTrans;\n    TransDate           yearStart;\n    container           cacheKey;\n    Global              globalCache;\n    str                 cacheKeyStr;\n    \n    try\n    {\n        // Build cache key including year to handle year-end transitions\n        yearStart = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone());\n        yearStart = mkDate(1, 1, year(yearStart));\n        cacheKey = [this.AccountNum, yearStart, curExt()];\n        cacheKeyStr = con2Str(cacheKey, '|');\n        \n        // Check global cache first (persists across sessions)\n        globalCache = Global::find();\n        if (globalCache)\n        {\n            totalSales = globalCache.parmValueAmountMST(cacheKeyStr);\n            if (totalSales != 0)\n            {\n                return totalSales;\n            }\n        }\n        \n        // Calculate total sales for current year\n        select crossCompany sum(AmountMST) from custTrans\n            where custTrans.AccountNum == this.AccountNum\n               && custTrans.TransDate >= yearStart\n               && custTrans.TransDate <= today()\n               && custTrans.TransType == LedgerTransType::Sales;\n               \n        totalSales = custTrans.AmountMST;\n        \n        // Cache result for 1 hour\n        if (globalCache)\n        {\n            globalCache.parmValueAmountMST(cacheKeyStr, totalSales, \n                DateTimeUtil::addHours(DateTimeUtil::getSystemDateTime(), 1));\n        }\n        \n        return totalSales;\n    }\n    catch (Exception::Error)\n    {\n        warning(strFmt(\"Could not calculate YTD sales for customer %1\", this.AccountNum));\n        return 0;\n    }\n}\n\n// Helper method to clear cache when transactions are posted\npublic void clearSalesCache()\n{\n    Global              globalCache;\n    container           cacheKey;\n    TransDate           yearStart;\n    \n    yearStart = mkDate(1, 1, year(today()));\n    cacheKey = [this.AccountNum, yearStart, curExt()];\n    \n    globalCache = Global::find();\n    if (globalCache)\n    {\n        globalCache.clearValue(con2Str(cacheKey, '|'));\n    }\n    \n    // Also clear display cache\n    this.displayCache().parmValue(tableMethodStr(CustTable, displayTotalSalesYTD), '');\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods must be lightweight and fast since they're called frequently during form operations — avoid database queries without proper caching",
+        "Edit methods should validate input data and implement proper error handling with try/catch blocks and transactional consistency using tts statements",
+        "Use SysClientCacheDataMethodAttribute(true) to enable kernel-level caching for display methods that perform expensive calculations",
+        "Override displayOption() checks to implement custom caching strategies for display methods that access external data sources or perform complex calculations",
+        "Edit methods must handle both get and set operations in the same method using boolean and value parameters with proper parameter validation"
+      ],
+      "gotchas": [
+        "Never perform database writes directly in display methods — they should be read-only operations, otherwise you'll encounter transaction scope issues and performance problems",
+        "Forgetting to handle the _set parameter correctly in edit methods causes infinite recursion when the form tries to display the current value",
+        "Display methods called from reports or data entities don't have form context, so displayOption() may not work as expected — always provide fallback logic for these scenarios"
+      ],
+      "performance_tips": [
+        "Implement intelligent caching using Global class or static variables for display methods that perform expensive operations like web service calls or complex calculations",
+        "Use select statements with specific field lists rather than full record selection in display methods to minimize data transfer and memory usage"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_forms",
+        "xpp_caching"
+      ],
+      "quiz": [
+        {
+          "q": "What happens if you don't handle the _set parameter correctly in an edit method?",
+          "options": [
+            "The method will throw a compilation error",
+            "The form control will show incorrect values",
+            "The method will cause infinite recursion",
+            "The database record won't be saved"
+          ],
+          "answer": 2,
+          "explanation": "Edit methods that don't properly handle the _set parameter will cause infinite recursion because the form will continuously call the method to get the current value, which triggers the setter logic again."
+        },
+        {
+          "q": "Which attribute should you use to enable kernel-level caching for display methods?",
+          "options": [
+            "SysClientCacheDataMethodAttribute(true)",
+            "SysDisplayMethodCacheAttribute",
+            "SysCacheEnabledAttribute",
+            "DisplayMethodAttribute(cached=true)"
+          ],
+          "answer": 0,
+          "explanation": "SysClientCacheDataMethodAttribute(true) is the correct attribute that tells the kernel to cache display method results per record to avoid redundant calculations."
+        },
+        {
+          "q": "Why should display methods avoid database writes?",
+          "options": [
+            "Database writes are not allowed in display methods by the compiler",
+            "It causes performance issues due to frequent execution",
+            "Display methods don't have transaction context",
+            "It will cause form validation errors"
+          ],
+          "answer": 1,
+          "explanation": "Display methods are called frequently during form operations (refreshes, navigation, etc.), so database writes would cause severe performance problems and potential transaction conflicts."
+        }
+      ]
+    },
+    "generated_date": "2026-05-31",
+    "auto_generated": true
   }
 ]

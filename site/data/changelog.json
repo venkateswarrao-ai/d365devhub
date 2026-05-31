@@ -1,5 +1,13 @@
 [
   {
+    "date": "May 31",
+    "tag": "LESSON",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "id": "xpp_display_methods"
+  },
+  {
     "date": "May 30",
     "tag": "LESSON",
     "title": "Display & Edit Methods in X++",
@@ -230,13 +238,5 @@
     "section": "Agentic AI",
     "level": "Expert",
     "id": "ai_copilot_extend"
-  },
-  {
-    "date": "May 01",
-    "tag": "LESSON",
-    "title": "RAG Pipeline for X++ Code Assistant",
-    "section": "Agentic AI",
-    "level": "Expert",
-    "id": "ai_rag_xpp"
   }
 ]

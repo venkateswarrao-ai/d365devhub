@@ -8062,5 +8062,102 @@
     },
     "generated_date": "2026-05-31",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "ui",
+      "forms",
+      "computed-fields"
+    ],
+    "summary": "Master display and edit methods in X++ to create computed fields, enhance form behavior, and implement dynamic UI logic in D365 F&O.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable computed fields, dynamic UI behavior, and data transformation in D365 F&O forms and reports. Unlike regular table fields, these methods execute on-demand to calculate values, format data, or provide editable computed properties. They're essential for creating rich user experiences without polluting your data model with calculated fields.\n\nDisplay methods return computed values (read-only), while edit methods provide two-way binding for calculated properties that users can modify. Both execute in the UI layer and are cached by the kernel for performance. Understanding their lifecycle, caching behavior, and proper implementation patterns is crucial for building responsive, maintainable D365 solutions.\n\nThese methods are particularly powerful in form datasources, grid controls, and report designs where you need to present derived data, apply business logic formatting, or enable editing of computed properties while maintaining data integrity.",
+      "theory": "Display and edit methods in X++ are special method types identified by the 'display' and 'edit' keywords respectively. They're designed to work seamlessly with the D365 F&O UI framework, automatically binding to form controls and providing computed field behavior. The kernel handles caching, change tracking, and UI refresh automatically.\n\nDisplay methods must return a value and cannot modify data directly. They're typically used for calculated fields, formatted displays, or lookup values. The return type determines how the UI renders the field - EDT-based return types inherit formatting, while primitive types use default formatting. The kernel caches display method results per record until the underlying data changes or a cache refresh is triggered.\n\nEdit methods provide bidirectional computed properties. They must implement both getter and setter logic within the same method using the optional parameter pattern. When called without parameters, they return the current value. When called with a parameter, they set the value and typically update underlying table fields. The kernel automatically calls edit methods during form validation and data save operations.\n\nBoth method types integrate deeply with the SysFormRun framework, participating in form events like validateWrite(), write(), and refresh(). They can access the current record context through 'this' and interact with other datasource methods. Performance is critical - these methods execute frequently during scrolling, filtering, and form interactions.",
+      "code_examples": [
+        {
+          "title": "Basic Display Methods with Caching",
+          "description": "Implementation of display methods showing computed fields, formatting, and cache behavior",
+          "language": "xpp",
+          "code": "// On CustTable table extension\npublic display AmountMST totalSalesAmount()\n{\n    SalesTable salesTable;\n    AmountMST totalAmount;\n    \n    // Use query hint for performance\n    select sum(SalesQty * SalesPrice) from salesTable\n        where salesTable.CustAccount == this.AccountNum\n           && salesTable.SalesStatus != SalesStatus::Canceled;\n    \n    return salesTable.SalesQty * salesTable.SalesPrice;\n}\n\npublic display str customerDisplayName()\n{\n    // Format customer name with account number\n    return strFmt('%1 (%2)', this.Name, this.AccountNum);\n}\n\npublic display NoYesId hasOpenOrders()\n{\n    SalesTable salesTable;\n    \n    // Efficient existence check\n    select firstonly RecId from salesTable\n        where salesTable.CustAccount == this.AccountNum\n           && salesTable.SalesStatus == SalesStatus::Backorder;\n    \n    return salesTable.RecId ? NoYes::Yes : NoYes::No;\n}\n\n// Force cache refresh when needed\npublic void refreshDisplayMethods()\n{\n    FormDataSource fds;\n    \n    // Get form datasource if available\n    if (this.dataSource())\n    {\n        fds = this.dataSource();\n        fds.research(true); // Refresh with cache clear\n    }\n}"
+        },
+        {
+          "title": "Edit Methods for Computed Properties",
+          "description": "Bidirectional edit methods with validation and underlying field updates",
+          "language": "xpp",
+          "code": "// On SalesLine table extension\npublic edit AmountMST lineTotal(AmountMST _lineTotal = this.calcLineAmount())\n{\n    AmountMST newUnitPrice;\n    \n    // Getter: return calculated value\n    if (prmIsDefault(_lineTotal))\n    {\n        return this.calcLineAmount(); // Use existing calculation method\n    }\n    \n    // Setter: validate and update underlying fields\n    if (_lineTotal < 0)\n    {\n        error(\"@SYS26332\"); // Line total cannot be negative\n        return this.calcLineAmount();\n    }\n    \n    // Calculate new unit price based on desired total\n    if (this.SalesQty != 0)\n    {\n        newUnitPrice = _lineTotal / this.SalesQty;\n        \n        ttsbegin;\n        this.SalesPrice = newUnitPrice;\n        // Recalculate dependent fields\n        this.calcLineDisc();\n        this.modifiedField(fieldNum(SalesLine, SalesPrice));\n        ttscommit;\n    }\n    \n    return this.calcLineAmount();\n}\n\npublic edit Percent discountPercent(Percent _discountPct = this.calcDiscountPercent())\n{\n    AmountMST discountAmount;\n    \n    if (prmIsDefault(_discountPct))\n    {\n        return this.calcDiscountPercent();\n    }\n    \n    // Validate percentage range\n    if (_discountPct < 0 || _discountPct > 100)\n    {\n        error(\"Discount percentage must be between 0 and 100\");\n        return this.calcDiscountPercent();\n    }\n    \n    try\n    {\n        ttsbegin;\n        \n        // Calculate and set discount amount\n        discountAmount = (this.SalesPrice * this.SalesQty) * (_discountPct / 100);\n        this.LineDisc = discountAmount;\n        \n        // Trigger recalculation of dependent methods\n        this.modifiedField(fieldNum(SalesLine, LineDisc));\n        \n        ttscommit;\n    }\n    catch (Exception::Error)\n    {\n        error(\"Failed to update discount percentage\");\n    }\n    \n    return _discountPct;\n}"
+        },
+        {
+          "title": "Advanced Form Integration and Performance",
+          "description": "Display methods optimized for forms with proper datasource integration and caching strategies",
+          "language": "xpp",
+          "code": "// On form datasource (SalesTable)\npublic display str salesOrderStatus()\n{\n    str statusText;\n    FormColorStr colorStr;\n    SysExtensionCache cache = SysExtensionCache::getValue(this, 'OrderStatusCache');\n    \n    // Use extension cache for expensive calculations\n    if (cache)\n    {\n        return cache;\n    }\n    \n    // Calculate status with business logic\n    switch (this.SalesStatus)\n    {\n        case SalesStatus::Backorder:\n            statusText = \"@SYS123456\"; // Pending\n            break;\n        case SalesStatus::Delivered:\n            statusText = this.isFullyInvoiced() ? \"@SYS123457\" : \"@SYS123458\";\n            break;\n        default:\n            statusText = enum2str(this.SalesStatus);\n    }\n    \n    // Cache the result\n    SysExtensionCache::setValue(this, 'OrderStatusCache', statusText, 300); // 5 min cache\n    return statusText;\n}\n\n// Form method to handle display method events\nclass SalesTableForm_DS\n{\n    public void active()\n    {\n        super();\n        \n        // Refresh computed fields when record changes\n        this.object(fieldNum(SalesTable, salesOrderStatus)).dataSourceObject().executeQuery();\n    }\n    \n    public boolean validateWrite()\n    {\n        boolean ret = super();\n        \n        // Clear cache when record is modified\n        if (ret)\n        {\n            SysExtensionCache::removeValue(this.cursor(), 'OrderStatusCache');\n        }\n        \n        return ret;\n    }\n}\n\n// Optimized display method with query caching\npublic display int openLineCount()\n{\n    SalesLine salesLine;\n    int lineCount;\n    QueryRun queryRun;\n    Query query;\n    \n    // Build efficient query\n    query = new Query();\n    query.dataSourceTable(tableNum(SalesLine));\n    query.dataSourceTable(tableNum(SalesLine)).addRange(fieldNum(SalesLine, SalesId)).value(this.SalesId);\n    query.dataSourceTable(tableNum(SalesLine)).addRange(fieldNum(SalesLine, RemainSalesPhysical)).value('>0');\n    \n    queryRun = new QueryRun(query);\n    \n    while (queryRun.next())\n    {\n        lineCount++;\n    }\n    \n    return lineCount;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods are read-only computed fields that execute on-demand and are cached by the kernel for performance",
+        "Edit methods provide bidirectional computed properties using the optional parameter pattern (getter when no params, setter with params)",
+        "Both method types integrate with form datasources and participate in form events like validateWrite() and active()",
+        "Return types should use EDTs for proper formatting and UI integration rather than primitive types",
+        "Cache management is crucial — use SysExtensionCache for expensive calculations and clear cache when underlying data changes"
+      ],
+      "gotchas": [
+        "Display methods executing during grid scrolling can cause severe performance issues — always optimize queries and consider caching expensive operations",
+        "Edit methods must handle both getter and setter scenarios properly — forgetting to check prmIsDefault() leads to infinite recursion or incorrect behavior",
+        "Modifying 'this' record directly in display methods breaks form datasource integrity — use modifiedField() and proper tts transactions in edit methods instead"
+      ],
+      "performance_tips": [
+        "Use select firstonly for existence checks and avoid select count(*) in display methods that execute during grid operations",
+        "Implement SysExtensionCache for expensive calculations and clear cache strategically when underlying data changes"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_queries",
+        "xpp_tables"
+      ],
+      "quiz": [
+        {
+          "q": "What happens when you call an edit method without parameters?",
+          "options": [
+            "It throws an error",
+            "It returns the current computed value (getter behavior)",
+            "It sets the value to null",
+            "It clears the field cache"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods use the optional parameter pattern. When called without parameters (prmIsDefault() returns true), they act as getters and return the current computed value."
+        },
+        {
+          "q": "Which is the most efficient way to check if a customer has open sales orders in a display method?",
+          "options": [
+            "select count(*) from SalesTable",
+            "select firstonly RecId from SalesTable",
+            "while select SalesTable",
+            "select * from SalesTable"
+          ],
+          "answer": 1,
+          "explanation": "select firstonly RecId is most efficient because it stops at the first match and only selects the RecId field, minimizing data transfer and processing time."
+        },
+        {
+          "q": "When should you clear display method cache?",
+          "options": [
+            "Never, the kernel handles it automatically",
+            "Every time the form loads",
+            "When underlying data changes that affects the computed value",
+            "Only when the user logs out"
+          ],
+          "answer": 2,
+          "explanation": "Cache should be cleared when underlying data changes that would affect the computed value, ensuring users see current data while maintaining performance benefits."
+        }
+      ]
+    },
+    "generated_date": "2026-06-01",
+    "auto_generated": true
   }
 ]

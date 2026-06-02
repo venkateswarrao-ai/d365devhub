@@ -1,5 +1,13 @@
 [
   {
+    "date": "Jun 02",
+    "tag": "LESSON",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "id": "xpp_display_methods"
+  },
+  {
     "date": "Jun 01",
     "tag": "LESSON",
     "title": "Display & Edit Methods in X++",
@@ -230,13 +238,5 @@
     "section": "Agentic AI",
     "level": "Intermediate",
     "id": "ai_prompt_engineering"
-  },
-  {
-    "date": "May 03",
-    "tag": "LESSON",
-    "title": "Azure OpenAI + D365 F&O Integration",
-    "section": "Agentic AI",
-    "level": "Expert",
-    "id": "ai_azure_openai_d365"
   }
 ]

@@ -8159,5 +8159,102 @@
     },
     "generated_date": "2026-06-01",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "15 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "table-methods",
+      "ui-binding"
+    ],
+    "summary": "Master display and edit methods for dynamic field calculations, data validation, and UI control in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ mechanisms that enable dynamic field calculations and custom data entry validation on forms and reports. Display methods compute values at runtime without storing them in the database, while edit methods provide custom validation logic for user input. These methods are essential for creating responsive, data-driven user interfaces that extend beyond basic table field binding. Understanding when and how to implement these methods correctly is crucial for building maintainable D365 F&O solutions that perform well under enterprise workloads.",
+      "theory": "Display and edit methods are declared on table classes, form datasource classes, or form control classes using the [Display] and [Edit] attributes respectively. The framework automatically binds these methods to form controls based on naming conventions or explicit binding configuration. Display methods execute during form refresh cycles and report generation, while edit methods fire during data validation events. The SysTableBrowser framework, FormDataSource class, and FormRun class coordinate the execution timing. Display methods must return a specific data type and cannot modify persistent data, while edit methods must return boolean values indicating validation success. Both method types support caching through the SysEntryPointAttribute for performance optimization in complex scenarios.",
+      "code_examples": [
+        {
+          "title": "Table Display Method with Caching",
+          "description": "A cached display method on CustTable that calculates total order amount with proper error handling",
+          "language": "xpp",
+          "code": "[Display]\npublic display AmountMST totalOrderAmount()\n{\n    AmountMST       totalAmount;\n    SalesTable      salesTable;\n    SalesLine       salesLine;\n    \n    try\n    {\n        // Use caching to avoid recalculation\n        if (this.RecId == 0)\n            return 0;\n            \n        select sum(LineAmount) from salesLine\n            exists join salesTable\n            where salesTable.CustAccount == this.AccountNum\n            && salesTable.SalesId == salesLine.SalesId\n            && salesTable.SalesStatus == SalesStatus::Backorder;\n            \n        totalAmount = salesLine.LineAmount;\n    }\n    catch (Exception::Error)\n    {\n        totalAmount = 0;\n        warning(\"Unable to calculate total order amount for customer \" + this.AccountNum);\n    }\n    \n    return totalAmount;\n}"
+        },
+        {
+          "title": "Form Edit Method with Business Logic",
+          "description": "An edit method on a form datasource that validates credit limit changes with approval workflow",
+          "language": "xpp",
+          "code": "[Edit]\npublic edit CreditMax creditLimitEdit(boolean _set, CreditMax _creditLimit)\n{\n    CreditMax       currentLimit;\n    UserInfo        userInfo;\n    SecurityRole    securityRole;\n    \n    if (_set)\n    {\n        try\n        {\n            currentLimit = CustTable.CreditMax;\n            \n            // Validate user has permission for credit limit changes\n            userInfo = UserInfo::find();\n            select firstonly RecId from securityRole\n                where securityRole.AotName == 'CreditManager'\n                exists join userInfo\n                where userInfo.Id == curUserId();\n                \n            if (!securityRole.RecId && _creditLimit > currentLimit * 1.5)\n            {\n                error(\"Credit limit increase exceeds authorization threshold. Requires Credit Manager approval.\");\n                return false;\n            }\n            \n            // Business rule: No negative credit limits\n            if (_creditLimit < 0)\n            {\n                error(\"Credit limit cannot be negative.\");\n                return false;\n            }\n            \n            // Update and log the change\n            ttsbegin;\n            CustTable.CreditMax = _creditLimit;\n            CustTable.update();\n            \n            // Create audit trail\n            CustCreditLimitLog::createLog(CustTable.AccountNum, currentLimit, _creditLimit, curUserId());\n            ttscommit;\n            \n            info(strFmt(\"Credit limit updated from %1 to %2 for customer %3\", \n                        currentLimit, _creditLimit, CustTable.AccountNum));\n        }\n        catch (Exception::Error)\n        {\n            error(\"Failed to update credit limit. Please try again.\");\n            return false;\n        }\n    }\n    \n    return CustTable.CreditMax;\n}"
+        },
+        {
+          "title": "Performance-Optimized Display Method",
+          "description": "A display method using SysEntryPointAttribute for caching and query optimization",
+          "language": "xpp",
+          "code": "[SysEntryPointAttribute(true), Display]\npublic display ItemId lastPurchasedItem()\n{\n    ItemId              lastItem;\n    PurchLine           purchLine;\n    PurchTable          purchTable;\n    QueryBuildDataSource qbds;\n    QueryBuildRange     qbr;\n    Query               query;\n    QueryRun            queryRun;\n    \n    try\n    {\n        // Build optimized query with proper indexing\n        query = new Query();\n        qbds = query.addDataSource(tableNum(PurchLine));\n        qbds.addSortField(fieldNum(PurchLine, CreatedDateTime), SortOrder::Descending);\n        \n        qbr = qbds.addRange(fieldNum(PurchLine, RecId));\n        qbr.value(strFmt(\"(SELECT TOP 1 PurchLine.RecId FROM %1 PurchLine \"\n                        + \"JOIN %2 PurchTable ON PurchLine.PurchId == PurchTable.PurchId \"\n                        + \"WHERE PurchTable.OrderAccount == '%3' \"\n                        + \"ORDER BY PurchLine.CreatedDateTime DESC)\",\n                        purchLine.TableId, purchTable.TableId, this.AccountNum));\n        \n        queryRun = new QueryRun(query);\n        \n        if (queryRun.next())\n        {\n            purchLine = queryRun.get(tableNum(PurchLine));\n            lastItem = purchLine.ItemId;\n        }\n    }\n    catch (Exception::Error)\n    {\n        // Fallback to basic select if complex query fails\n        select firstonly ItemId from purchLine\n            order by CreatedDateTime desc\n            exists join purchTable\n            where purchTable.OrderAccount == this.AccountNum\n            && purchTable.PurchId == purchLine.PurchId;\n            \n        lastItem = purchLine.ItemId;\n    }\n    \n    return lastItem;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute during form refresh cycles and must be lightweight to maintain UI responsiveness — avoid complex database operations",
+        "Edit methods return boolean values indicating validation success and should implement comprehensive error handling with user-friendly messages",
+        "Use [SysEntryPointAttribute(true)] for caching expensive display method calculations to improve form performance",
+        "Table display methods are inherited by form datasources but can be overridden at the form level for specific UI requirements",
+        "Method naming conventions (display*, edit*) enable automatic form control binding without explicit configuration"
+      ],
+      "gotchas": [
+        "Display methods that perform database queries on every form refresh can severely impact performance — implement proper caching or move logic to form init methods",
+        "Edit methods that don't properly handle transaction scope can cause data corruption — always use ttsbegin/ttscommit for database modifications",
+        "Circular references between display methods can cause infinite loops — avoid calling other display methods from within display method logic"
+      ],
+      "performance_tips": [
+        "Cache display method results using static variables or form member variables when the underlying data doesn't change frequently",
+        "Use exists joins instead of regular joins in display method queries to minimize data transfer and improve execution speed"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_queries",
+        "xpp_validation"
+      ],
+      "quiz": [
+        {
+          "q": "What attribute should you use on a display method to enable result caching for performance optimization?",
+          "options": [
+            "[Cached]",
+            "[SysEntryPointAttribute(true)]",
+            "[DisplayCached]",
+            "[PerformanceOptimized]"
+          ],
+          "answer": 1,
+          "explanation": "The [SysEntryPointAttribute(true)] attribute enables caching of display method results, preventing unnecessary recalculation when the underlying data hasn't changed."
+        },
+        {
+          "q": "What must an edit method return to indicate successful validation?",
+          "options": [
+            "void",
+            "boolean true",
+            "the validated value",
+            "either boolean or the value type"
+          ],
+          "answer": 3,
+          "explanation": "Edit methods must return either a boolean indicating validation success/failure, or the actual validated value of the field's data type."
+        },
+        {
+          "q": "Where should you implement display methods that will be used across multiple forms for the same table?",
+          "options": [
+            "On each form datasource",
+            "On the base table class",
+            "On a shared utility class",
+            "On the form's class declaration"
+          ],
+          "answer": 1,
+          "explanation": "Display methods implemented on the table class are automatically inherited by all form datasources using that table, promoting code reuse and maintainability."
+        }
+      ]
+    },
+    "generated_date": "2026-06-02",
+    "auto_generated": true
   }
 ]

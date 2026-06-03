@@ -8256,5 +8256,102 @@
     },
     "generated_date": "2026-06-02",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "25 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "computed-fields",
+      "ui-logic"
+    ],
+    "summary": "Master display and edit methods for creating computed fields, custom validations, and dynamic UI behaviors in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are X++ methods that extend table and form functionality by providing computed values, custom formatting, and interactive field behaviors without modifying the underlying data model. Display methods calculate and show values dynamically (read-only), while edit methods allow users to input values that trigger custom logic or update related fields. These methods are essential for creating sophisticated business logic in forms, reports, and data entities while maintaining clean separation between data storage and presentation logic.\n\nIn D365 F&O, display and edit methods bridge the gap between raw data and user experience. They're commonly used for calculated fields (like total amounts), status indicators, lookup behaviors, and field validations that go beyond simple table-level constraints. Understanding their lifecycle, caching behavior, and performance implications is crucial for building responsive enterprise applications.",
+      "theory": "Display and edit methods operate within the Form Data Source (FormDataSource) and Table buffer contexts, executing during form rendering and user interaction cycles. The kernel calls display methods during form refresh operations and datasource research() calls, while edit methods execute when users modify field values and focus leaves the control. Both method types have access to the current record buffer and can reference any field within the same datasource or related tables through joins.\n\nThe method signature must follow strict conventions: display methods return the displayed value type and accept no parameters beyond the standard buffer context, while edit methods are void and accept the input value as a parameter. The kernel uses reflection to bind these methods to form controls through the DataMethod property. Display methods support caching through the DisplayCache attribute, which prevents unnecessary recalculation during the same transaction scope. Edit methods typically trigger during the validateWrite() chain and must handle validation failures gracefully.\n\nPerformance considerations are critical since display methods execute for every visible record in grids and can cause N+1 query problems if they access related data without proper join strategies. The SysTableBrowser and FormDataSource frameworks provide built-in mechanisms for bulk loading related data to optimize display method performance in enterprise scenarios.",
+      "code_examples": [
+        {
+          "title": "Display Method for Calculated Fields",
+          "description": "Shows how to create a display method that calculates customer credit balance from multiple related tables with proper error handling and performance optimization",
+          "language": "xpp",
+          "code": "// On CustTable table\n[DisplayCache(true)]\npublic display AmountMST calcCreditBalance()\n{\n    AmountMST balance = 0;\n    CustTrans custTrans;\n    \n    try\n    {\n        // Use exists join for performance\n        select sum(AmountMST) from custTrans\n            where custTrans.AccountNum == this.AccountNum\n               && custTrans.TransType == LedgerTransType::Cust\n               && !custTrans.Closed;\n        \n        balance = custTrans.AmountMST;\n        \n        // Apply credit limit logic\n        if (this.CreditMax > 0 && balance > this.CreditMax)\n        {\n            balance = this.CreditMax - balance; // Show remaining credit\n        }\n    }\n    catch (Exception::Error)\n    {\n        error(\"Error calculating credit balance for customer %1\", this.AccountNum);\n        balance = 0;\n    }\n    \n    return balance;\n}\n\n// Usage in form datasource method\npublic void research(boolean _retainPosition = false)\n{\n    QueryBuildDataSource qbds;\n    \n    super(_retainPosition);\n    \n    // Pre-load related data to optimize display methods\n    qbds = this.query().dataSourceTable(tableNum(CustTable));\n    qbds.addLink(fieldNum(CustTable, AccountNum), fieldNum(CustTrans, AccountNum));\n    qbds.relations(true);\n}"
+        },
+        {
+          "title": "Edit Method with Validation and Cascading Updates",
+          "description": "Demonstrates an edit method that validates input, updates related fields, and triggers business logic when users modify calculated values",
+          "language": "xpp",
+          "code": "// On SalesTable table\npublic edit DiscPercent salesLineDiscountPercent(boolean _set, DiscPercent _discPercent)\n{\n    DiscPercent currentDiscPercent;\n    SalesLine salesLine;\n    \n    if (_set)\n    {\n        try\n        {\n            ttsbegin;\n            \n            // Validate discount percentage\n            if (_discPercent < 0 || _discPercent > 100)\n            {\n                throw error(\"Discount percentage must be between 0 and 100\");\n            }\n            \n            // Check authorization for high discounts\n            if (_discPercent > 20 && !SecurityUtil::hasPermission(securitykeyNum(HighDiscountApproval)))\n            {\n                throw error(\"High discount approval required for discounts over 20%\");\n            }\n            \n            // Update all related sales lines\n            while select forupdate salesLine\n                where salesLine.SalesId == this.SalesId\n                   && salesLine.SalesStatus == SalesStatus::Backorder\n            {\n                salesLine.DiscPercent = _discPercent;\n                \n                // Recalculate line amount\n                salesLine.calcLineAmount();\n                \n                if (salesLine.validateWrite())\n                {\n                    salesLine.update();\n                }\n                else\n                {\n                    throw error(\"Failed to update sales line %1\", salesLine.ItemId);\n                }\n            }\n            \n            // Update header totals\n            this.calcTotals();\n            \n            // Log the change for audit\n            info(strFmt(\"Applied %1%% discount to %2 sales lines in order %3\", \n                      _discPercent, SysQuery::countTotal(salesLine), this.SalesId));\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            // Re-throw to show user the error\n            throw;\n        }\n    }\n    else\n    {\n        // Getter: Calculate average discount from lines\n        select avg(DiscPercent) from salesLine\n            where salesLine.SalesId == this.SalesId;\n            \n        currentDiscPercent = salesLine.DiscPercent;\n    }\n    \n    return currentDiscPercent;\n}"
+        },
+        {
+          "title": "Display Method with Complex Business Logic",
+          "description": "Advanced example showing status calculation with workflow integration, multiple data sources, and conditional formatting hints",
+          "language": "xpp",
+          "code": "// On PurchTable table\n[DisplayCache(false)] // Don't cache due to workflow state changes\npublic display container purchOrderStatusDisplay()\n{\n    container statusContainer;\n    str statusText;\n    int colorIndex;\n    PurchStatus baseStatus;\n    WorkflowStatus workflowStatus;\n    boolean hasReceiptDiscrepancies;\n    \n    try\n    {\n        baseStatus = this.PurchStatus;\n        workflowStatus = this.WorkflowStatus;\n        \n        // Check for receiving discrepancies\n        hasReceiptDiscrepancies = this.hasReceivingDiscrepancies();\n        \n        // Determine display status based on complex business rules\n        switch (baseStatus)\n        {\n            case PurchStatus::Backorder:\n                if (workflowStatus == WorkflowStatus::Pending)\n                {\n                    statusText = \"Pending Approval\";\n                    colorIndex = 3; // Yellow\n                }\n                else if (this.isOverdue())\n                {\n                    statusText = \"Overdue\";\n                    colorIndex = 1; // Red\n                }\n                else\n                {\n                    statusText = \"Open\";\n                    colorIndex = 0; // Default\n                }\n                break;\n                \n            case PurchStatus::Received:\n                if (hasReceiptDiscrepancies)\n                {\n                    statusText = \"Received - Discrepancies\";\n                    colorIndex = 2; // Orange\n                }\n                else\n                {\n                    statusText = \"Received\";\n                    colorIndex = 4; // Green\n                }\n                break;\n                \n            case PurchStatus::Invoiced:\n                statusText = \"Complete\";\n                colorIndex = 4; // Green\n                break;\n                \n            default:\n                statusText = enum2Str(baseStatus);\n                colorIndex = 0;\n                break;\n        }\n        \n        // Add urgency indicator for expedited orders\n        if (this.DeliveryMode && DlvMode::find(this.DeliveryMode).IsExpedited)\n        {\n            statusText = \"⚡ \" + statusText;\n        }\n        \n        // Return container with text and color hint for form control\n        statusContainer = [statusText, colorIndex];\n    }\n    catch (Exception::Error)\n    {\n        error(\"Error determining purchase order status for %1\", this.PurchId);\n        statusContainer = [\"Error\", 1];\n    }\n    \n    return statusContainer;\n}\n\n// Helper method for workflow integration\nprivate boolean isOverdue()\n{\n    return this.DeliveryDate < DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()) \n           && this.PurchStatus == PurchStatus::Backorder;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute during form refresh cycles and should be optimized for performance — use DisplayCache attribute for expensive calculations that don't change within a transaction",
+        "Edit methods must handle validation gracefully and use ttsbegin/ttscommit blocks when modifying related records to ensure data consistency",
+        "Both method types have access to the current table buffer and can reference related tables, but avoid N+1 queries by using proper joins in the datasource query",
+        "Method signatures are strictly enforced — display methods return values with no parameters, edit methods are void and accept boolean _set and the value parameter",
+        "Display methods can return containers for complex UI scenarios like conditional formatting, status indicators, or multi-column displays in form controls"
+      ],
+      "gotchas": [
+        "DisplayCache attribute caches values per record buffer instance, not globally — modifications to related data in the same transaction won't refresh cached display values until next record selection",
+        "Edit methods that modify other fields must call element.formDataSource().refresh() or specific field refresh methods to update dependent display methods in forms",
+        "Display methods execute for every visible row in grids — a display method with database queries on a 1000-row grid will execute 1000 queries unless properly optimized with datasource joins"
+      ],
+      "performance_tips": [
+        "Use exists joins in display methods rather than select statements when you only need to check for related record existence — this leverages SQL Server's query optimization for boolean checks",
+        "Pre-populate related data using datasource addLink() methods and enable relations(true) to bulk-load joined data and minimize display method database roundtrips"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_tables",
+        "xpp_select"
+      ],
+      "quiz": [
+        {
+          "q": "What is the key difference between a display method and an edit method in terms of method signature?",
+          "options": [
+            "Display methods are static while edit methods are instance methods",
+            "Display methods return values with no parameters, edit methods are void with boolean _set and value parameters",
+            "Display methods use public modifier while edit methods use private",
+            "Display methods cache results while edit methods don't"
+          ],
+          "answer": 1,
+          "explanation": "Display methods return the value to display and take no parameters beyond the implicit table buffer context. Edit methods are void and accept a boolean _set parameter to determine if it's a getter or setter call, plus the value parameter for setter operations."
+        },
+        {
+          "q": "When should you use the DisplayCache attribute on a display method?",
+          "options": [
+            "Always, to improve performance",
+            "Never, it causes memory leaks",
+            "When the calculated value is expensive and won't change within the current transaction scope",
+            "Only for methods that access external web services"
+          ],
+          "answer": 2,
+          "explanation": "DisplayCache(true) should be used when the display method performs expensive calculations (complex queries, web service calls, etc.) and the result won't change within the same transaction. This prevents redundant calculations for the same record buffer instance."
+        },
+        {
+          "q": "What is the most critical performance consideration when implementing display methods used in form grids?",
+          "options": [
+            "Using try/catch blocks for error handling",
+            "Implementing proper database query optimization to avoid N+1 query problems",
+            "Declaring variables as private instead of public",
+            "Using container return types for complex data"
+          ],
+          "answer": 1,
+          "explanation": "Display methods execute once per visible row in grids. Without proper query optimization (using datasource joins, exists queries, etc.), each display method can trigger separate database queries, creating N+1 query performance problems in large datasets."
+        }
+      ]
+    },
+    "generated_date": "2026-06-03",
+    "auto_generated": true
   }
 ]

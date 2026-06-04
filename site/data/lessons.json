@@ -8353,5 +8353,101 @@
     },
     "generated_date": "2026-06-03",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "data-binding"
+    ],
+    "summary": "Master display and edit methods in X++ for dynamic form field calculations, data transformations, and real-time UI updates in D365 F&O.",
+    "content": {
+      "overview": "Display and edit methods are specialized X++ methods that enable dynamic field calculations and data transformations in forms without storing computed values in the database. Display methods calculate and show derived values (like full names from first/last name fields), while edit methods allow users to input data that gets parsed and stored in underlying table fields. These methods are essential for creating responsive, user-friendly interfaces in D365 F&O.\n\nUnlike regular table fields, display/edit methods execute on-demand, making them perfect for calculations that depend on multiple fields or external data sources. They're commonly used for formatting monetary amounts, concatenating address components, calculating ages from birth dates, or creating virtual fields that simplify data entry. Understanding their lifecycle, caching behavior, and performance implications is crucial for building scalable D365 solutions.\n\nThese methods integrate seamlessly with the D365 form framework, automatically binding to form controls and participating in the standard refresh/redraw cycle. They support the same metadata attributes as regular fields, including security, help text, and data validation, making them first-class citizens in the AOT ecosystem.",
+      "theory": "Display and edit methods in D365 F&O are implemented as public methods on table classes that follow specific naming conventions and return appropriate data types. The framework automatically discovers these methods through reflection and makes them available as virtual fields in forms, reports, and queries. Display methods are read-only calculations that return computed values, while edit methods provide bidirectional data binding for complex input scenarios.\n\nThe method signature follows strict patterns: display methods must be public, have a specific return type matching the intended field type, and can accept parameters for context. Edit methods follow similar rules but include additional logic for parsing user input and updating underlying table fields. The framework caches display method results during form refresh cycles to minimize redundant calculations, but developers must understand when to invalidate this cache.\n\nIntegration with the AOT happens through method modifiers and attributes. The [SysClientCacheDataMethodAttribute] controls client-side caching behavior, while security attributes like [SysEntryPointAttribute] control access. Display methods participate in the standard D365 security model, supporting field-level security and data entity projections. When used in forms, these methods automatically bind to controls and participate in the form's data source refresh cycle, triggering recalculation when dependent fields change.",
+      "code_examples": [
+        {
+          "title": "Table Display Method with Caching",
+          "description": "Shows a practical display method on CustTable for customer credit status with proper caching and error handling",
+          "language": "xpp",
+          "code": "// On CustTable table class\n[SysClientCacheDataMethodAttribute(true)]\npublic display CustCreditStatus creditStatusDisplay()\n{\n    CustCreditStatus creditStatus = CustCreditStatus::Good;\n    CustTrans custTrans;\n    AmountCur outstandingAmount;\n    \n    try\n    {\n        // Calculate outstanding balance\n        select sum(AmountCur) from custTrans\n            where custTrans.AccountNum == this.AccountNum\n                && custTrans.Closed == NoYes::No;\n        \n        outstandingAmount = custTrans.AmountCur;\n        \n        // Determine credit status based on credit limit\n        if (outstandingAmount > this.CreditMax && this.CreditMax > 0)\n        {\n            creditStatus = CustCreditStatus::Exceeded;\n        }\n        else if (outstandingAmount > (this.CreditMax * 0.8) && this.CreditMax > 0)\n        {\n            creditStatus = CustCreditStatus::Warning;\n        }\n        \n        return creditStatus;\n    }\n    catch (Exception::Error)\n    {\n        error(\"Error calculating credit status for customer: \" + this.AccountNum);\n        return CustCreditStatus::Unknown;\n    }\n}\n\n[SysClientCacheDataMethodAttribute(true)]\npublic display Name customerFullName()\n{\n    DirPartyTable dirParty;\n    \n    select firstonly Name from dirParty\n        where dirParty.RecId == this.Party;\n    \n    return dirParty.Name ? dirParty.Name : this.AccountNum;\n}"
+        },
+        {
+          "title": "Edit Method for Complex Data Entry",
+          "description": "Demonstrates an edit method for handling formatted address input that parses and updates multiple table fields",
+          "language": "xpp",
+          "code": "// On CustTable table class\npublic edit LogisticsAddressStreet addressLineEdit(boolean _set, LogisticsAddressStreet _addressLine)\n{\n    LogisticsPostalAddress postalAddress;\n    LogisticsLocation location;\n    DirPartyLocation partyLocation;\n    \n    if (_set)\n    {\n        // Parse the input address line\n        if (strLen(_addressLine) > 0)\n        {\n            ttsbegin;\n            try\n            {\n                // Find primary address for this customer\n                select firstonly partyLocation\n                    where partyLocation.Party == this.Party\n                        && partyLocation.IsPrimary == NoYes::Yes;\n                \n                if (partyLocation.RecId)\n                {\n                    location = LogisticsLocation::find(partyLocation.Location);\n                    \n                    select forupdate postalAddress\n                        where postalAddress.Location == location.RecId;\n                    \n                    if (postalAddress.RecId)\n                    {\n                        // Simple parsing - in production, use more sophisticated logic\n                        postalAddress.Street = _addressLine;\n                        postalAddress.update();\n                        \n                        info(strFmt(\"Address updated for customer %1\", this.AccountNum));\n                    }\n                    else\n                    {\n                        // Create new postal address\n                        postalAddress.clear();\n                        postalAddress.Location = location.RecId;\n                        postalAddress.Street = _addressLine;\n                        postalAddress.ValidFrom = DateTimeUtil::utcNow();\n                        postalAddress.ValidTo = DateTimeUtil::maxValue();\n                        postalAddress.insert();\n                    }\n                }\n                ttscommit;\n            }\n            catch (Exception::Error)\n            {\n                ttsabort;\n                error(\"Failed to update address for customer: \" + this.AccountNum);\n            }\n        }\n    }\n    else\n    {\n        // Get current address for display\n        select firstonly partyLocation\n            where partyLocation.Party == this.Party\n                && partyLocation.IsPrimary == NoYes::Yes;\n        \n        if (partyLocation.RecId)\n        {\n            location = LogisticsLocation::find(partyLocation.Location);\n            \n            select firstonly postalAddress\n                where postalAddress.Location == location.RecId\n                    && postalAddress.ValidFrom <= DateTimeUtil::utcNow()\n                    && postalAddress.ValidTo >= DateTimeUtil::utcNow();\n            \n            return postalAddress.Street;\n        }\n    }\n    \n    return '';\n}"
+        },
+        {
+          "title": "Form Integration and Refresh Optimization",
+          "description": "Shows how to properly integrate display methods in forms with refresh optimization and cache management",
+          "language": "xpp",
+          "code": "// On CustTableListPage form datasource (CustTable)\npublic void refresh()\n{\n    super();\n    \n    // Force recalculation of display methods when specific fields change\n    if (this.hasFieldChanged(fieldNum(CustTable, CreditMax)) ||\n        this.hasFieldChanged(fieldNum(CustTable, AccountNum)))\n    {\n        // Clear client cache for credit status display method\n        this.clearDisplayCache();\n    }\n}\n\n// On form control for display method\npublic void jumpRef()\n{\n    CustTable custTable = this.datasource().cursor();\n    Args args = new Args();\n    MenuFunction menuFunction;\n    \n    // Navigate to customer credit analysis when clicking credit status\n    if (custTable.RecId)\n    {\n        args.record(custTable);\n        args.caller(this);\n        \n        menuFunction = new MenuFunction(menuitemdisplaystr(CustTableBalances), MenuItemType::Display);\n        menuFunction.run(args);\n    }\n}\n\n// Custom method to invalidate display method cache\npublic void invalidateDisplayMethods()\n{\n    FormDataSource ds;\n    CustTable custTable;\n    \n    ds = this.dataSource();\n    \n    for (custTable = ds.getFirst(true); custTable; custTable = ds.getNext())\n    {\n        // Force refresh of cached display methods\n        custTable.rereadDisplayMethods();\n    }\n    \n    // Refresh the form to show updated values\n    ds.research(true);\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods are cached per form refresh cycle — understand when cache invalidation occurs to avoid stale data",
+        "Edit methods must handle both get and set operations in a single method using the boolean _set parameter",
+        "Use [SysClientCacheDataMethodAttribute(true)] to enable client-side caching for expensive calculations that don't change frequently",
+        "Display methods execute in the context of the current record — avoid heavy database operations without proper optimization",
+        "Security attributes on display/edit methods are enforced just like regular table fields, enabling field-level security"
+      ],
+      "gotchas": [
+        "Display methods that perform database queries can cause N+1 query problems in grids — batch data loading or use temp tables instead",
+        "Client-cached display methods won't refresh automatically when dependent data changes in other sessions — implement proper cache invalidation",
+        "Edit methods that fail validation should not throw exceptions directly — use checkFailed() pattern and return false to prevent form crashes"
+      ],
+      "performance_tips": [
+        "Batch database operations in display methods using QueryRun or select statements with joins instead of multiple single-record queries",
+        "Consider using SysComputedColumn for frequently-accessed calculations that can be computed at the database level instead of X++ display methods"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_classes",
+        "xpp_forms"
+      ],
+      "quiz": [
+        {
+          "q": "When is the best time to use client-side caching for display methods?",
+          "options": [
+            "For methods that access real-time data",
+            "For expensive calculations with infrequent changes",
+            "For methods that modify data",
+            "For all display methods by default"
+          ],
+          "answer": 1,
+          "explanation": "Client-side caching is ideal for expensive calculations that don't change frequently during a user session, such as complex financial calculations or aggregations that only update when master data changes."
+        },
+        {
+          "q": "What is the correct pattern for handling both get and set operations in an edit method?",
+          "options": [
+            "Create separate getter and setter methods",
+            "Use the boolean _set parameter to branch logic",
+            "Override the write() method instead",
+            "Use event handlers for data changes"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods use a single method with a boolean _set parameter. When _set is true, the method should process the input value; when false, it should return the current value for display."
+        },
+        {
+          "q": "Which approach best prevents N+1 query problems in display methods shown in grids?",
+          "options": [
+            "Add indexes to all referenced tables",
+            "Use client-side caching for all methods",
+            "Batch load related data using temp tables or joins",
+            "Disable display methods in grid views"
+          ],
+          "answer": 2,
+          "explanation": "Batching related data using temp tables, joins, or QueryRun prevents the N+1 problem by loading all necessary data in fewer database round trips instead of one query per grid row."
+        }
+      ]
+    },
+    "generated_date": "2026-06-04",
+    "auto_generated": true
   }
 ]

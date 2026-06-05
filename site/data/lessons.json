@@ -8449,5 +8449,102 @@
     },
     "generated_date": "2026-06-04",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "ssrs",
+      "calculated-fields"
+    ],
+    "summary": "Master display and edit methods in X++ to create calculated fields, enhance forms, and build dynamic UI behavior in D365 F&O applications.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable calculated fields and dynamic UI behavior in D365 F&O. Display methods provide read-only calculated values shown on forms, reports, and data entities, while edit methods allow users to modify calculated fields that update underlying data. These methods are essential for creating business logic that extends beyond simple table fields, such as computing totals, concatenating names, or displaying formatted values. Understanding their execution context, caching behavior, and performance implications is crucial for building responsive enterprise applications.",
+      "theory": "Display and edit methods are executed within the context of table buffers, form data sources, or report data providers. The framework automatically detects these methods based on their naming convention and method signature, then exposes them as virtual fields in the AOT metadata. Display methods must return a value and cannot modify data, while edit methods accept a parameter and typically update related table records. The kernel caches display method results per record to optimize performance, but this caching can cause stale data if not properly managed. These methods integrate seamlessly with the SysTableBrowser framework, form controls, SSRS reports, and data entities. The method resolution follows inheritance hierarchy, allowing derived tables to override display methods from parent tables. Understanding the difference between server-side execution (for reports and batch jobs) and client-side execution (for forms) is critical for proper implementation.",
+      "code_examples": [
+        {
+          "title": "Basic Display Method on Table",
+          "description": "Simple display method on CustTable showing full customer name concatenation with proper null handling",
+          "language": "xpp",
+          "code": "// On CustTable table\ndisplay Name displayFullName()\n{\n    Name fullName;\n    \n    if (this.Name && this.NameAlias)\n    {\n        fullName = strFmt('%1 (%2)', this.Name, this.NameAlias);\n    }\n    else if (this.Name)\n    {\n        fullName = this.Name;\n    }\n    else\n    {\n        fullName = this.AccountNum;\n    }\n    \n    return fullName;\n}\n\n// Usage example in a job\nstatic void displayMethodExample(Args _args)\n{\n    CustTable custTable;\n    \n    select firstonly custTable\n        where custTable.AccountNum == '1101';\n    \n    if (custTable.RecId)\n    {\n        info(strFmt('Customer: %1', custTable.displayFullName()));\n    }\n}"
+        },
+        {
+          "title": "Advanced Edit Method with Transaction Handling",
+          "description": "Edit method on CustTable that updates credit limit with validation and proper transaction scope",
+          "language": "xpp",
+          "code": "// On CustTable table\nedit CustCreditMax editCreditLimit(boolean _set = false, CustCreditMax _creditLimit = 0)\n{\n    DictTable dictTable;\n    \n    if (_set)\n    {\n        if (_creditLimit < 0)\n        {\n            throw error(\"Credit limit cannot be negative\");\n        }\n        \n        if (_creditLimit > 1000000)\n        {\n            if (!checkFailed(\"Credit limit exceeds 1M. Continue?\"))\n            {\n                return this.CreditMax;\n            }\n        }\n        \n        ttsbegin;\n        try\n        {\n            this.selectForUpdate(true);\n            this.CreditMax = _creditLimit;\n            this.ModifiedBy = curUserId();\n            this.ModifiedDateTime = DateTimeUtil::utcNow();\n            this.update();\n            \n            // Log the change\n            info(strFmt('Credit limit updated for customer %1: %2', \n                       this.AccountNum, \n                       num2Str(_creditLimit, -1, 2, 1, 1)));\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            throw;\n        }\n    }\n    \n    return this.CreditMax;\n}\n\n// Usage example\nstatic void editMethodExample(Args _args)\n{\n    CustTable custTable;\n    \n    custTable = CustTable::find('1101', true);\n    if (custTable.RecId)\n    {\n        // Get current value\n        info(strFmt('Current credit limit: %1', custTable.editCreditLimit()));\n        \n        // Set new value\n        custTable.editCreditLimit(true, 50000);\n    }\n}"
+        },
+        {
+          "title": "Complex Display Method with Caching and Performance",
+          "description": "Performance-optimized display method that calculates customer balance with proper caching strategy",
+          "language": "xpp",
+          "code": "// On CustTable table\npublic class CustTable extends DirPartyTable\n{\n    private AmountMST balanceCache;\n    private boolean balanceCached;\n    \n    display AmountMST displayCurrentBalance()\n    {\n        CustTrans custTrans;\n        AmountMST balance;\n        \n        // Check if already cached for this record\n        if (this.balanceCached)\n        {\n            return this.balanceCache;\n        }\n        \n        // Calculate balance using efficient query\n        select sum(AmountMST) from custTrans\n            where custTrans.AccountNum == this.AccountNum\n               && custTrans.TransType != LedgerTransType::CloseVoucher;\n               \n        balance = custTrans.AmountMST;\n        \n        // Cache the result\n        this.balanceCache = balance;\n        this.balanceCached = true;\n        \n        return balance;\n    }\n    \n    // Clear cache when record changes\n    public void reread()\n    {\n        super();\n        this.clearBalanceCache();\n    }\n    \n    public void refresh()\n    {\n        super();\n        this.clearBalanceCache();\n    }\n    \n    private void clearBalanceCache()\n    {\n        this.balanceCache = 0;\n        this.balanceCached = false;\n    }\n}\n\n// Form data source method to handle cache invalidation\n// On CustTable form data source\npublic int active()\n{\n    int ret = super();\n    \n    // Clear display method cache when moving to different record\n    if (ret)\n    {\n        CustTable custTable = this.cursor();\n        custTable.clearBalanceCache();\n    }\n    \n    return ret;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods must have 'display' keyword and return a value — they cannot modify data and are automatically cached by the kernel per record",
+        "Edit methods use 'edit' keyword with boolean _set parameter — they handle both getting and setting values with proper validation and transaction control",
+        "Method signatures determine framework behavior — display methods take no parameters, edit methods follow the _set pattern for dual get/set functionality",
+        "Caching is automatic but can cause stale data — implement manual cache invalidation in reread(), refresh(), and active() methods when needed",
+        "Server vs client execution matters — forms run client-side while reports and batch jobs run server-side, affecting available APIs and performance characteristics"
+      ],
+      "gotchas": [
+        "Display method caching persists until record changes — calling displayMethod() multiple times returns cached value, not recalculated result. Clear cache manually in reread() and refresh() methods when underlying data changes",
+        "Edit method _set parameter defaults matter — always provide explicit default values in method signature. Forgetting boolean _set = false causes compilation errors when method is called without parameters",
+        "Form control binding requires exact naming — display/edit method names must match form control names exactly, including case sensitivity. Typos result in blank fields with no error messages"
+      ],
+      "performance_tips": [
+        "Implement manual caching for expensive calculations — store results in class variables and invalidate cache appropriately rather than recalculating on every call",
+        "Use select statements efficiently in display methods — prefer joins over multiple selects, use appropriate indexes, and consider using views or computed columns for complex aggregations"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_forms",
+        "xpp_select"
+      ],
+      "quiz": [
+        {
+          "q": "What happens when a display method is called multiple times on the same record without changing the record?",
+          "options": [
+            "Method recalculates each time",
+            "Cached result is returned",
+            "Compilation error occurs",
+            "Exception is thrown"
+          ],
+          "answer": 1,
+          "explanation": "The D365 kernel automatically caches display method results per record. Subsequent calls return the cached value until the record buffer changes, improving performance but potentially showing stale data."
+        },
+        {
+          "q": "What is the correct signature pattern for an edit method that handles both getting and setting a credit limit value?",
+          "options": [
+            "edit void setCreditLimit(CustCreditMax _value)",
+            "edit CustCreditMax editCreditLimit(boolean _set, CustCreditMax _value)",
+            "display CustCreditMax getCreditLimit()",
+            "edit CustCreditMax editCreditLimit(boolean _set = false, CustCreditMax _value = 0)"
+          ],
+          "answer": 3,
+          "explanation": "Edit methods must include default values for the _set parameter (false) and the value parameter. This allows the method to be called for both getting (no parameters) and setting (with parameters) the value."
+        },
+        {
+          "q": "When should you manually clear display method cache in table methods?",
+          "options": [
+            "Never, framework handles it automatically",
+            "In reread() and refresh() methods only",
+            "Only when data is modified",
+            "In reread(), refresh(), and when related data changes"
+          ],
+          "answer": 3,
+          "explanation": "Manual cache clearing is needed in reread() and refresh() methods, plus whenever related data that affects the display method calculation changes, to prevent showing stale cached values."
+        }
+      ]
+    },
+    "generated_date": "2026-06-05",
+    "auto_generated": true
   }
 ]

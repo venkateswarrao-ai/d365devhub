@@ -8546,5 +8546,108 @@
     },
     "generated_date": "2026-06-05",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display methods",
+      "edit methods",
+      "forms",
+      "user interface",
+      "computed fields"
+    ],
+    "summary": "Master display and edit methods for creating computed fields, form validation, and custom data presentation in D365 F&O.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ mechanisms for extending data presentation and input validation in D365 F&O forms without modifying underlying table structures. Display methods compute and show calculated values (like full names from first/last name fields), while edit methods provide custom validation and data transformation during user input. These methods are essential for creating rich user interfaces that present business logic directly in forms, reports, and inquiries. Understanding their proper implementation is crucial for any intermediate D365 developer working on user-facing functionality.",
+      "theory": "Display and edit methods operate within the D365 form framework as part of the Model-View-Controller pattern. They execute on the server tier and are automatically called by the kernel when forms render or validate data. Display methods must return a value and are marked with the [Display] attribute, while edit methods receive and validate input values using the [Edit] attribute. The kernel caches display method results per record to optimize performance, but this caching can cause issues if not properly understood. These methods can be implemented on table classes, form data source classes, or form control classes, with different scoping and execution contexts. The framework automatically handles method discovery through reflection and binds them to form controls via the DataMethod property.",
+      "code_examples": [
+        {
+          "title": "Basic Display Method on Table",
+          "description": "Creating a computed full name display method on CustTable with proper caching and null handling",
+          "language": "xpp",
+          "code": "// On CustTable table class\n[Display]\npublic display Name displayFullName()\n{\n    Name fullName;\n    \n    if (this.Name && this.MiddleName)\n    {\n        fullName = strFmt('%1 %2', this.Name, this.MiddleName);\n    }\n    else if (this.Name)\n    {\n        fullName = this.Name;\n    }\n    else\n    {\n        fullName = this.AccountNum; // Fallback to account number\n    }\n    \n    return fullName;\n}\n\n// Usage in form design: Set DataMethod property to 'displayFullName'\n// on a StringEdit control bound to the CustTable data source"
+        },
+        {
+          "title": "Advanced Edit Method with Validation",
+          "description": "Edit method for custom credit limit validation with business logic and error handling",
+          "language": "xpp",
+          "code": "// On CustTable table class\n[Edit]\npublic edit CreditMax editCreditLimit(boolean _set, CreditMax _creditLimit)\n{\n    CreditMax maxAllowedCredit = 1000000.00; // 1M limit\n    CustGroup custGroup;\n    \n    if (_set)\n    {\n        try\n        {\n            if (_creditLimit < 0)\n            {\n                throw error(\"Credit limit cannot be negative.\");\n            }\n            \n            // Check against customer group limits\n            select firstonly custGroup\n                where custGroup.CustGroup == this.CustGroup;\n                \n            if (custGroup && _creditLimit > custGroup.CreditMax)\n            {\n                throw error(strFmt(\"Credit limit %1 exceeds group limit of %2\",\n                    num2Str(_creditLimit, 2, 2, 1, 1),\n                    num2Str(custGroup.CreditMax, 2, 2, 1, 1)));\n            }\n            \n            if (_creditLimit > maxAllowedCredit)\n            {\n                warning(strFmt(\"High credit limit %1 requires approval.\",\n                    num2Str(_creditLimit, 2, 2, 1, 1)));\n            }\n            \n            this.CreditMax = _creditLimit;\n        }\n        catch (Exception::Error)\n        {\n            return this.CreditMax; // Return current value on error\n        }\n    }\n    \n    return this.CreditMax;\n}"
+        },
+        {
+          "title": "Form DataSource Display Method with Parameters",
+          "description": "Display method on form data source for calculated aging with date parameters and performance optimization",
+          "language": "xpp",
+          "code": "// On form data source class (CustTrans_DS)\npublic class FormDataSource_CustTrans extends FormDataSource\n{\n    [Display]\n    public display AmountCur displayAging30()\n    {\n        CustTrans custTrans = this.cursor();\n        TransDate cutoffDate = today() - 30;\n        AmountCur agingAmount;\n        \n        if (!custTrans.RecId)\n        {\n            return 0.00;\n        }\n        \n        // Use cached calculation if available\n        if (custTrans.DueDate && custTrans.DueDate < cutoffDate)\n        {\n            agingAmount = custTrans.AmountCur - custTrans.SettleAmountCur;\n        }\n        \n        return max(0.00, agingAmount);\n    }\n    \n    [Display]\n    public display str displayTransStatus()\n    {\n        CustTrans custTrans = this.cursor();\n        str statusText;\n        \n        switch (custTrans.CustTransType)\n        {\n            case CustTransType::Invoice:\n                statusText = custTrans.AmountCur == custTrans.SettleAmountCur ? \n                           'Fully Settled' : 'Outstanding';\n                break;\n                \n            case CustTransType::Payment:\n                statusText = 'Payment';\n                break;\n                \n            case CustTransType::CreditNote:\n                statusText = 'Credit Note';\n                break;\n                \n            default:\n                statusText = enum2Str(custTrans.CustTransType);\n        }\n        \n        return statusText;\n    }\n}"
+        },
+        {
+          "title": "Display Method with Database Lookup",
+          "description": "Performance-optimized display method with caching and joins to avoid N+1 query problems",
+          "language": "xpp",
+          "code": "// On SalesTable table class\npublic class SalesTable extends common\n{\n    // Class variable for caching\n    private Map customerNameCache;\n    \n    [Display]\n    public display CustName displayCustomerName()\n    {\n        CustTable custTable;\n        CustName customerName;\n        \n        // Initialize cache on first use\n        if (!customerNameCache)\n        {\n            customerNameCache = new Map(Types::String, Types::String);\n        }\n        \n        // Check cache first\n        if (customerNameCache.exists(this.CustAccount))\n        {\n            return customerNameCache.lookup(this.CustAccount);\n        }\n        \n        // Database lookup with error handling\n        try\n        {\n            select firstonly Name from custTable\n                where custTable.AccountNum == this.CustAccount;\n                \n            customerName = custTable.Name;\n            \n            if (!customerName)\n            {\n                customerName = strFmt('Customer %1 not found', this.CustAccount);\n            }\n            \n            // Cache the result\n            customerNameCache.insert(this.CustAccount, customerName);\n        }\n        catch (Exception::Error)\n        {\n            customerName = 'Error retrieving customer';\n            warning(strFmt('Failed to retrieve customer name for %1', this.CustAccount));\n        }\n        \n        return customerName;\n    }\n    \n    // Clear cache when customer account changes\n    public boolean validateField(FieldId _fieldIdToCheck)\n    {\n        boolean ret = super(_fieldIdToCheck);\n        \n        if (_fieldIdToCheck == fieldNum(SalesTable, CustAccount) && customerNameCache)\n        {\n            customerNameCache = null; // Reset cache\n        }\n        \n        return ret;\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute on server and are automatically cached per record — clearing cache requires understanding form refresh patterns",
+        "Edit methods must handle both _set=true (validation) and _set=false (get value) scenarios properly",
+        "Methods can be placed on tables, form data sources, or form controls with different execution contexts and performance implications",
+        "DataMethod property on form controls binds to method names — method discovery uses reflection at runtime",
+        "Display methods should always return appropriate default values and handle null/empty data gracefully"
+      ],
+      "gotchas": [
+        "Display method caching can show stale data after record updates — use FormDataSource.research() or FormDataSource.reread() to refresh display methods when underlying data changes",
+        "Edit methods that throw exceptions during _set=true will revert to original value — always catch exceptions and return current value to maintain form stability",
+        "Database queries in display methods create N+1 performance problems — implement caching strategies or use form data source joins instead of individual lookups per record"
+      ],
+      "performance_tips": [
+        "Cache expensive calculations in class variables and invalidate cache only when dependent fields change — this prevents repeated computation during form rendering",
+        "Use joins in form data source queries instead of display method database lookups to fetch related data in single query"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_tables",
+        "xpp_classes"
+      ],
+      "quiz": [
+        {
+          "q": "What happens when a display method throws an exception during form rendering?",
+          "options": [
+            "Form crashes and closes",
+            "Empty value is displayed and exception is logged",
+            "Previous cached value is shown",
+            "Default field value is used"
+          ],
+          "answer": 1,
+          "explanation": "When a display method throws an exception, the framework catches it, displays an empty value, and logs the error. The form continues to function normally, which is why proper exception handling in display methods is crucial for user experience."
+        },
+        {
+          "q": "When should you clear display method cache in form data sources?",
+          "options": [
+            "After every user input",
+            "When dependent field values change",
+            "On form close",
+            "Never, framework handles it automatically"
+          ],
+          "answer": 1,
+          "explanation": "Display method cache should be cleared when the underlying data that the display method depends on changes. This is typically done in validateField() or when refreshing the data source, as the framework doesn't automatically detect dependencies."
+        },
+        {
+          "q": "What is the correct pattern for edit methods with validation?",
+          "options": [
+            "Always throw exceptions on invalid input",
+            "Return false for invalid input",
+            "Handle both _set and get scenarios with try/catch",
+            "Only validate when _set is false"
+          ],
+          "answer": 2,
+          "explanation": "Edit methods must handle both scenarios: _set=true for validation/setting values and _set=false for getting values. Proper exception handling with try/catch prevents form instability and ensures the current value is returned on validation errors."
+        }
+      ]
+    },
+    "generated_date": "2026-06-06",
+    "auto_generated": true
   }
 ]

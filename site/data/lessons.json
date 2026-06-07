@@ -8649,5 +8649,102 @@
     },
     "generated_date": "2026-06-06",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "ui",
+      "calculated-fields"
+    ],
+    "summary": "Master display and edit methods for creating calculated fields, custom form controls, and dynamic UI behavior in D365 F&O.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ features that enable calculated fields, dynamic form behavior, and custom data presentation without modifying underlying table structures. Display methods return calculated values shown on forms, reports, and queries, while edit methods provide custom input validation and formatting for form controls. These methods execute on the client side for forms and server side for reports, making them essential for creating responsive, data-driven user interfaces in D365 F&O.",
+      "theory": "Display and edit methods are implemented as table methods decorated with [SysClientCacheDataMethodAttribute] for client-side caching or without decoration for server-side execution. The kernel automatically calls these methods when forms bind to data sources, when reports render data, or when queries project calculated fields. Display methods must return a primitive type or extended data type (EDT), while edit methods accept a value parameter and typically return boolean for validation success. The SysTableBrowser framework uses reflection to discover these methods at runtime, enabling dynamic form generation. For performance, display methods on forms cache results using the SysFormRun.dataSource().cacheCalculateMethod() infrastructure, but this cache invalidates on record changes. Edit methods integrate with the SysFormDataSource validation pipeline, executing before field validation and record updates.",
+      "code_examples": [
+        {
+          "title": "Basic Display Method Implementation",
+          "description": "Demonstrates display method syntax, caching, and form integration using CustTable",
+          "language": "xpp",
+          "code": "// On CustTable table\n[SysClientCacheDataMethodAttribute(true)]\ndisplay CustName fullCustomerName()\n{\n    CustName ret;\n    DirPartyTable dirParty;\n    \n    try\n    {\n        select firstonly Name from dirParty\n            where dirParty.RecId == this.Party;\n        \n        ret = strFmt('%1 (%2)', dirParty.Name, this.AccountNum);\n    }\n    catch (Exception::Error)\n    {\n        ret = this.AccountNum;\n    }\n    \n    return ret;\n}\n\n// Display method with parameters\ndisplay AmountCur customerBalance(TransDate _asOfDate = today())\n{\n    AmountCur balance;\n    CustTrans custTrans;\n    \n    select sum(AmountCur) from custTrans\n        where custTrans.AccountNum == this.AccountNum\n           && custTrans.TransDate <= _asOfDate\n           && custTrans.TransType == CustTransType::Payment;\n    \n    return custTrans.AmountCur;\n}\n\n// Usage in form data source method\npublic void executeQuery()\n{\n    super();\n    \n    // Force recalculation of display methods\n    this.cacheCalculateMethod(tableMethodStr(CustTable, fullCustomerName));\n    this.cacheCalculateMethod(tableMethodStr(CustTable, customerBalance));\n}"
+        },
+        {
+          "title": "Edit Method with Validation",
+          "description": "Shows edit method implementation with custom validation logic and integration with form validation pipeline",
+          "language": "xpp",
+          "code": "// On SalesTable table\nedit CustAccount editCustomerAccount(boolean _set, CustAccount _custAccount)\n{\n    CustTable custTable;\n    boolean ret = true;\n    \n    if (_set)\n    {\n        try\n        {\n            ttsbegin;\n            \n            // Validate customer exists and is active\n            select firstonly RecId from custTable\n                where custTable.AccountNum == _custAccount\n                   && custTable.Blocked == CustVendorBlocked::No;\n            \n            if (!custTable.RecId)\n            {\n                throw error(strFmt(\"Customer %1 is not active or does not exist.\", _custAccount));\n            }\n            \n            // Additional business validation\n            if (this.SalesStatus != SalesStatus::Backorder && \n                custTable.CustGroup == \"RESTRICTED\")\n            {\n                throw error(\"Restricted customers can only place backorders.\");\n            }\n            \n            // Update the field\n            this.CustAccount = _custAccount;\n            \n            // Trigger dependent field updates\n            this.InvoiceAccount = _custAccount;\n            this.CurrencyCode = custTable.Currency;\n            \n            ttscommit;\n            \n            info(strFmt(\"Customer %1 assigned successfully.\", _custAccount));\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            ret = false;\n        }\n    }\n    \n    return ret;\n}\n\n// Form control modified() method to use edit method\npublic boolean modified()\n{\n    boolean ret = super();\n    \n    if (ret)\n    {\n        // Call edit method for validation\n        ret = salesTable_ds.object(fieldNum(SalesTable, CustAccount))\n                          .editCustomerAccount(true, this.text());\n        \n        if (ret)\n        {\n            salesTable_ds.refresh();\n        }\n    }\n    \n    return ret;\n}"
+        },
+        {
+          "title": "Advanced Display Method Patterns",
+          "description": "Demonstrates complex scenarios including joins, aggregations, and performance optimization techniques",
+          "language": "xpp",
+          "code": "// Complex display method with multiple joins\n[SysClientCacheDataMethodAttribute(true)]\ndisplay str getItemCategoryHierarchy()\n{\n    str ret;\n    EcoResCategory category;\n    EcoResProduct product;\n    EcoResProductCategory productCategory;\n    container categoryNames = conNull();\n    int i;\n    \n    try\n    {\n        // Get product for this item\n        select firstonly RecId from product\n            where product.ProductNumber == this.ItemId;\n        \n        if (product.RecId)\n        {\n            // Build category hierarchy\n            while select Name from category\n                order by Level desc\n                exists join productCategory\n                where productCategory.Product == product.RecId\n                   && productCategory.Category == category.RecId\n            {\n                categoryNames = conIns(categoryNames, 1, category.Name);\n            }\n            \n            // Format hierarchy string\n            for (i = 1; i <= conLen(categoryNames); i++)\n            {\n                ret += (i > 1 ? ' > ' : '') + conPeek(categoryNames, i);\n            }\n        }\n    }\n    catch (Exception::Error)\n    {\n        ret = 'Error loading categories';\n    }\n    \n    return ret ? ret : 'No categories assigned';\n}\n\n// Performance-optimized display method using temporary table\nstatic Map itemPriceCache;\n\n[SysClientCacheDataMethodAttribute(true)]\ndisplay Price getCurrentPrice()\n{\n    Price ret;\n    PriceDiscTable priceDisc;\n    str cacheKey;\n    \n    // Initialize static cache\n    if (!itemPriceCache)\n    {\n        itemPriceCache = new Map(Types::String, Types::Real);\n    }\n    \n    cacheKey = strFmt('%1_%2', this.ItemId, today());\n    \n    // Check cache first\n    if (itemPriceCache.exists(cacheKey))\n    {\n        ret = itemPriceCache.lookup(cacheKey);\n    }\n    else\n    {\n        select firstonly Amount from priceDisc\n            where priceDisc.ItemCode == TableGroupAll::Table\n               && priceDisc.ItemRelation == this.ItemId\n               && priceDisc.FromDate <= today()\n               && (priceDisc.ToDate == dateNull() || priceDisc.ToDate >= today())\n            order by priceDisc.FromDate desc;\n        \n        ret = priceDisc.Amount;\n        \n        // Cache the result\n        itemPriceCache.insert(cacheKey, ret);\n    }\n    \n    return ret;\n}\n\n// Method to clear cache when prices change\npublic static void clearPriceCache()\n{\n    if (itemPriceCache)\n    {\n        itemPriceCache = null;\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute on client-side for forms and server-side for reports — use [SysClientCacheDataMethodAttribute(true)] for client-side caching of expensive calculations",
+        "Edit methods must return boolean to indicate validation success — false prevents field updates and triggers validation error display in forms",
+        "Use tableMethodStr() macro instead of string literals when referencing display methods in cacheCalculateMethod() calls for compile-time safety",
+        "Display methods with parameters cannot be bound directly to form controls — they require custom form logic or computed fields instead",
+        "Static variables in display methods persist across records during form browsing — use this for performance caching but ensure proper cache invalidation logic"
+      ],
+      "gotchas": [
+        "Display methods without client cache attribute recalculate on every form refresh — this causes performance issues with complex calculations or database queries inside display methods",
+        "Modifying table data inside display methods creates infinite recursion — display methods should be read-only calculations, use edit methods or form event handlers for data modification",
+        "Using select statements in display methods without proper exception handling crashes forms when database connectivity issues occur — always wrap database operations in try-catch blocks"
+      ],
+      "performance_tips": [
+        "Cache expensive calculations using static maps or temporary tables when display methods execute repeatedly on the same data set",
+        "Use exists joins instead of separate select statements when display methods need to check related record existence for better query plan optimization"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_select",
+        "xpp_classes"
+      ],
+      "quiz": [
+        {
+          "q": "What happens when a display method on a form does NOT have the SysClientCacheDataMethodAttribute?",
+          "options": [
+            "It caches results automatically",
+            "It recalculates on every form refresh",
+            "It only works on reports",
+            "It causes compilation errors"
+          ],
+          "answer": 1,
+          "explanation": "Why B is correct: Without the SysClientCacheDataMethodAttribute, display methods recalculate every time the form refreshes or the user navigates between records, potentially causing performance issues with complex calculations."
+        },
+        {
+          "q": "Which statement is true about edit methods in X++?",
+          "options": [
+            "They must return void",
+            "They can only validate string fields",
+            "They must return boolean for validation success",
+            "They automatically commit transactions"
+          ],
+          "answer": 2,
+          "explanation": "Why C is correct: Edit methods must return boolean to indicate whether the validation and assignment succeeded. Returning false prevents the field update and displays validation errors in the form."
+        },
+        {
+          "q": "When should you use static variables in display methods?",
+          "options": [
+            "Never, they cause memory leaks",
+            "For caching expensive calculations across records",
+            "Only in batch jobs",
+            "To store user preferences"
+          ],
+          "answer": 1,
+          "explanation": "Why B is correct: Static variables in display methods persist across record navigation, making them useful for caching expensive calculations like lookup tables or computed values that don't change frequently during a form session."
+        }
+      ]
+    },
+    "generated_date": "2026-06-07",
+    "auto_generated": true
   }
 ]

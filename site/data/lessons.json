@@ -8746,5 +8746,103 @@
     },
     "generated_date": "2026-06-07",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "xpp",
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "ui"
+    ],
+    "summary": "Master X++ display and edit methods for creating calculated fields, custom UI logic, and real-time data presentation in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable dynamic field calculations and custom UI behaviors in D365 F&O. Display methods compute values shown in forms and reports without storing data in the database, while edit methods provide custom validation and data manipulation logic for user input. These methods are essential for creating sophisticated business logic that responds to user interactions and data changes in real-time.\n\nUnderstanding when to use display methods versus calculated fields, computed columns, or stored procedures is crucial for performance and maintainability. Display methods execute on the client tier, making them ideal for UI-specific calculations but potentially problematic for large datasets. They're commonly used in scenarios like calculating derived values (total amounts, ages, status indicators), formatting display text, and providing dynamic lookups based on current record context.\n\nMastering these methods is essential for any D365 developer working on customizations, as they form the backbone of most form customizations and provide the flexibility needed to meet complex business requirements while maintaining clean separation between data storage and presentation logic.",
+      "theory": "Display and edit methods in X++ are special method types that integrate directly with the Application Object Tree (AOT) and D365's metadata-driven architecture. Display methods must return a value and are marked with the [SysClientCacheDataMethodAttribute] for client-side caching optimization. They execute in the context of the current record and have access to all table fields through the 'this' reference.\n\nThe D365 kernel automatically calls display methods when forms refresh, records change, or explicit refresh operations occur through datasource.research() calls. The framework manages caching behavior through the FormDataSource class hierarchy, with methods like FormDataSource.cacheCalculateMethod() controlling when recalculation occurs. Display methods can be defined on tables (inherited by all forms using that table), form datasources (form-specific), or form controls (control-specific).\n\nEdit methods provide bidirectional data flow, allowing users to modify calculated values that then update underlying table fields. They work through getter/setter pairs and integrate with the form's validation framework via the FormControl.validate() method chain. The SysSetupFormRun class demonstrates advanced patterns for edit methods in system administration forms.\n\nInternally, display/edit methods are managed by the kernel's reflection system (DictMethod class) and form runtime (FormRun, FormDataSource, FormControl classes). Understanding the method resolution order—control level, datasource level, table level—is crucial for troubleshooting inheritance conflicts and performance optimization.",
+      "code_examples": [
+        {
+          "title": "Table-Level Display Method with Caching",
+          "description": "A production-grade display method on CustTable showing total sales with proper caching and error handling",
+          "language": "xpp",
+          "code": "// On CustTable table\n[SysClientCacheDataMethodAttribute(true)]\npublic display AmountMST totalSalesAmount()\n{\n    CustTrans   custTrans;\n    AmountMST   totalAmount;\n    \n    try\n    {\n        // Use select sum for performance\n        select sum(AmountCur) from custTrans\n            where custTrans.AccountNum == this.AccountNum\n            && custTrans.TransType == CustTransType::Sales;\n        \n        totalAmount = custTrans.AmountCur;\n        \n        // Convert to MST if needed\n        if (this.Currency != Ledger::accountingCurrency())\n        {\n            totalAmount = Currency::amount2MST(totalAmount, \n                                             this.Currency, \n                                             DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()));\n        }\n    }\n    catch (Exception::Error)\n    {\n        // Log error but don't break UI\n        error(\"Error calculating total sales amount for customer \" + this.AccountNum);\n        totalAmount = 0;\n    }\n    \n    return totalAmount;\n}\n\n// Display method for credit status with enum translation\n[SysClientCacheDataMethodAttribute(true)]\npublic display str creditStatusDisplay()\n{\n    CustCreditLimit creditLimit;\n    str statusText;\n    \n    select firstonly creditLimit\n        where creditLimit.AccountNum == this.AccountNum;\n    \n    if (creditLimit.RecId)\n    {\n        statusText = enum2Str(creditLimit.CreditRating);\n        if (creditLimit.CreditMax > 0)\n        {\n            statusText += strFmt(\" (Limit: %1)\", num2Str(creditLimit.CreditMax, 0, 2, 1, 1));\n        }\n    }\n    else\n    {\n        statusText = \"No limit set\";\n    }\n    \n    return statusText;\n}"
+        },
+        {
+          "title": "Form Datasource Edit Method with Validation",
+          "description": "Edit method on a form datasource allowing users to modify calculated shipping dates with business rule validation",
+          "language": "xpp",
+          "code": "// On SalesTable form datasource\npublic edit TransDate requestedShipDateEdit(boolean _set = false, TransDate _requestedDate = dateNull())\n{\n    TransDate currentDate;\n    \n    if (_set)\n    {\n        // Validation logic\n        if (_requestedDate < DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()))\n        {\n            error(\"Requested ship date cannot be in the past\");\n            return this.RequestedShipDate;\n        }\n        \n        // Business rule: Check if date allows sufficient lead time\n        InventTable inventTable;\n        int maxLeadTime = 0;\n        \n        // Find maximum lead time from all line items\n        SalesLine salesLine;\n        while select inventTable\n            join salesLine\n            where salesLine.SalesId == this.SalesId\n            && salesLine.ItemId == inventTable.ItemId\n        {\n            if (inventTable.LeadTime > maxLeadTime)\n            {\n                maxLeadTime = inventTable.LeadTime;\n            }\n        }\n        \n        if (_requestedDate < (DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()) + maxLeadTime))\n        {\n            warning(strFmt(\"Requested date may not allow sufficient lead time. Recommended minimum: %1\",\n                          DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()) + maxLeadTime));\n        }\n        \n        // Update the actual field\n        ttsbegin;\n        try\n        {\n            this.RequestedShipDate = _requestedDate;\n            \n            // Cascade to lines if needed\n            this.updateShipDateOnLines(_requestedDate);\n            \n            ttscommit;\n            \n            // Refresh dependent calculations\n            this.dataSource().cacheCalculateMethod(tableMethodStr(SalesTable, deliveryDateDisplay));\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            throw;\n        }\n    }\n    \n    return this.RequestedShipDate;\n}\n\n// Supporting method for cascading updates\nprivate void updateShipDateOnLines(TransDate _newShipDate)\n{\n    SalesLine salesLine;\n    \n    update_recordset salesLine\n        setting RequestedShipDate = _newShipDate\n        where salesLine.SalesId == this.SalesId\n        && salesLine.RequestedShipDate != _newShipDate;\n        \n    info(strFmt(\"%1 sales lines updated with new ship date\", salesLine.RowCount()));\n}"
+        },
+        {
+          "title": "Advanced Display Method with Performance Optimization",
+          "description": "Complex display method with caching strategy and cross-company data access for vendor performance metrics",
+          "language": "xpp",
+          "code": "// On VendTable table - Vendor performance score calculation\nprivate static Map vendorScoreCache;\nprivate static utcdatetime lastCacheUpdate;\n\n[SysClientCacheDataMethodAttribute(true)]\npublic display Real vendorPerformanceScore()\n{\n    Real performanceScore = 0.0;\n    str cacheKey;\n    container scoreData;\n    utcdatetime currentDateTime = DateTimeUtil::utcNow();\n    \n    // Initialize static cache if needed\n    if (!vendorScoreCache)\n    {\n        vendorScoreCache = new Map(Types::String, Types::Container);\n        lastCacheUpdate = currentDateTime;\n    }\n    \n    cacheKey = this.AccountNum + \"#\" + curext();\n    \n    // Check cache validity (refresh every 30 minutes)\n    if (vendorScoreCache.exists(cacheKey) && \n        (currentDateTime - lastCacheUpdate) < 1800) // 30 minutes in seconds\n    {\n        scoreData = vendorScoreCache.lookup(cacheKey);\n        return conPeek(scoreData, 1);\n    }\n    \n    try\n    {\n        // Complex calculation involving multiple factors\n        Real onTimeDeliveryScore = this.calculateOnTimeDeliveryScore();\n        Real qualityScore = this.calculateQualityScore();\n        Real costEfficiencyScore = this.calculateCostEfficiencyScore();\n        \n        // Weighted average\n        performanceScore = (onTimeDeliveryScore * 0.4) + \n                          (qualityScore * 0.35) + \n                          (costEfficiencyScore * 0.25);\n        \n        // Cache the result\n        vendorScoreCache.insert(cacheKey, [performanceScore, currentDateTime]);\n        \n        if ((currentDateTime - lastCacheUpdate) > 1800)\n        {\n            lastCacheUpdate = currentDateTime;\n        }\n    }\n    catch (Exception::Error)\n    {\n        error(strFmt(\"Error calculating performance score for vendor %1\", this.AccountNum));\n        performanceScore = 0.0;\n    }\n    \n    return performanceScore;\n}\n\nprivate Real calculateOnTimeDeliveryScore()\n{\n    PurchTable purchTable;\n    PurchLine purchLine;\n    int totalDeliveries = 0;\n    int onTimeDeliveries = 0;\n    TransDate fromDate = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()) - 365;\n    \n    // Cross-company query for complete vendor history\n    changecompany(\"*\")\n    {\n        while select count(RecId) from purchLine\n            join purchTable\n            where purchTable.PurchId == purchLine.PurchId\n            && purchTable.VendAccount == this.AccountNum\n            && purchTable.PurchStatus == PurchStatus::Received\n            && purchTable.DeliveryDate >= fromDate\n        {\n            totalDeliveries += purchLine.RecId;\n            \n            if (purchTable.DeliveryDate <= purchTable.RequestedDeliveryDate)\n            {\n                onTimeDeliveries++;\n            }\n        }\n    }\n    \n    return totalDeliveries > 0 ? (real2int(onTimeDeliveries) * 100.0 / real2int(totalDeliveries)) : 0.0;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute on client tier and should include [SysClientCacheDataMethodAttribute(true)] for performance optimization in list pages and grids",
+        "Method resolution follows control → datasource → table hierarchy; override at appropriate level to avoid unnecessary inheritance",
+        "Edit methods require both getter and setter logic with proper validation; use ttsbegin/ttscommit for transactional integrity when updating multiple fields",
+        "Cache expensive calculations using static variables or Map collections, but implement cache invalidation strategies to prevent stale data",
+        "Avoid SELECT statements in display methods for list pages; instead use computed columns or pre-calculated fields for better performance with large datasets"
+      ],
+      "gotchas": [
+        "Display methods on tables execute for EVERY record in grids — a SELECT statement in a display method on a 1000-record grid means 1000+ database calls, causing severe performance issues",
+        "Forgetting to mark display methods with [SysClientCacheDataMethodAttribute] causes unnecessary recalculation on every form refresh, especially problematic in list pages with sorting/filtering",
+        "Edit method validation errors don't automatically prevent field updates — you must explicitly check validation results and throw exceptions or return original values to prevent invalid data persistence"
+      ],
+      "performance_tips": [
+        "Use computed columns on views or aggregate queries in staging tables instead of display methods for reporting scenarios with large datasets",
+        "Implement client-side caching with time-based invalidation for display methods that perform complex calculations or external service calls"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_tables",
+        "xpp_caching",
+        "xpp_validation"
+      ],
+      "quiz": [
+        {
+          "q": "When should you avoid using display methods with SELECT statements?",
+          "options": [
+            "In form detail views",
+            "In list pages and grids",
+            "In reports",
+            "In batch jobs"
+          ],
+          "answer": 1,
+          "explanation": "Display methods with SELECT statements should be avoided in list pages and grids because they execute for every visible record, potentially causing hundreds or thousands of database calls and severe performance degradation."
+        },
+        {
+          "q": "What attribute should be used on display methods for optimal caching?",
+          "options": [
+            "[SysClientCacheDataMethodAttribute(true)]",
+            "[CacheMethod]",
+            "[DisplayMethodAttribute]",
+            "[ClientCacheAttribute]"
+          ],
+          "answer": 0,
+          "explanation": "[SysClientCacheDataMethodAttribute(true)] enables client-side caching of display method results, preventing unnecessary recalculation when forms refresh or records change, which is crucial for performance."
+        },
+        {
+          "q": "In what order does the system resolve display method calls?",
+          "options": [
+            "Table → Datasource → Control",
+            "Control → Datasource → Table",
+            "Datasource → Control → Table",
+            "Control → Table → Datasource"
+          ],
+          "answer": 1,
+          "explanation": "The system resolves display methods in Control → Datasource → Table order, meaning if a method exists on multiple levels, the most specific (control level) takes precedence over more general implementations."
+        }
+      ]
+    },
+    "generated_date": "2026-06-08",
+    "auto_generated": true
   }
 ]

@@ -8844,5 +8844,102 @@
     },
     "generated_date": "2026-06-08",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "ui-logic",
+      "calculated-fields"
+    ],
+    "summary": "Master display and edit methods to create calculated fields, conditional UI logic, and real-time data transformations in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable dynamic, calculated field values in forms, reports, and data entities without persisting data to the database. They execute on-demand when UI elements request their values, making them perfect for calculations, lookups, formatting, and conditional logic that depends on current record state.\n\nUnlike regular table fields, display/edit methods provide real-time computed values that automatically refresh when underlying data changes. Display methods are read-only calculated fields, while edit methods allow user input that can trigger business logic or update related fields. Understanding their execution context, caching behavior, and performance implications is crucial for building responsive, maintainable D365 applications.\n\nThese methods are extensively used throughout standard D365 functionality — from invoice totals and customer credit limits to formatted addresses and status indicators. Mastering them enables you to extend forms intelligently, create sophisticated UI behaviors, and implement complex business rules that respond dynamically to user interactions.",
+      "theory": "Display and edit methods execute within the table's context and have access to all table fields and methods through the 'this' reference. The D365 runtime automatically calls these methods when forms, reports, or data entities need to display their values. They're defined with the [Display] or [Edit] attribute and specific return types that determine how the UI renders them.\n\nThe method execution happens on the server side, even for client forms, which means they can access any server-side API including database queries, business logic classes, and system functions. However, this also means they can impact form performance if not properly optimized. The framework includes intelligent caching mechanisms — display methods are only re-executed when their dependencies change, determined by the framework's dependency tracking.\n\nKey architectural considerations include the method's scope (table, form datasource, or form control), parameter handling for edit methods, and integration with the SysFormRun framework. Display methods can accept parameters, enabling contextual calculations based on form state or user selections. Edit methods receive both the current value and can return modified values, enabling real-time validation and transformation of user input before it's committed to the underlying field.",
+      "code_examples": [
+        {
+          "title": "Customer Credit Status Display Method",
+          "description": "A display method that calculates and formats customer credit status with conditional styling based on current balance and credit limit",
+          "language": "xpp",
+          "code": "[Display]\npublic display CreditStatusDisplay creditStatus()\n{\n    CustTable custTable = this;\n    CustTransOpen custTransOpen;\n    AmountMST currentBalance = 0;\n    CreditStatusDisplay statusText;\n    \n    try\n    {\n        // Calculate current open balance\n        while select sum(AmountMST) from custTransOpen\n            where custTransOpen.AccountNum == custTable.AccountNum\n                && custTransOpen.AmountMST > 0\n        {\n            currentBalance += custTransOpen.AmountMST;\n        }\n        \n        // Determine status based on credit limit and balance\n        if (custTable.CreditMax == 0)\n        {\n            statusText = \"No Credit Limit\";\n        }\n        else if (currentBalance > custTable.CreditMax)\n        {\n            statusText = strFmt(\"Over Limit: %1 / %2\", \n                              num2Str(currentBalance, 0, 2, 1, 1),\n                              num2Str(custTable.CreditMax, 0, 2, 1, 1));\n        }\n        else\n        {\n            real utilizationPct = (currentBalance / custTable.CreditMax) * 100;\n            if (utilizationPct > 80)\n            {\n                statusText = strFmt(\"Warning: %1% utilized\", num2Str(utilizationPct, 0, 1, 1, 1));\n            }\n            else\n            {\n                statusText = strFmt(\"Good: %1% utilized\", num2Str(utilizationPct, 0, 1, 1, 1));\n            }\n        }\n    }\n    catch (Exception::Error)\n    {\n        statusText = \"Error calculating status\";\n    }\n    \n    return statusText;\n}"
+        },
+        {
+          "title": "Sales Order Line Discount Edit Method",
+          "description": "An edit method that validates discount percentages and automatically updates line amounts with business rule enforcement",
+          "language": "xpp",
+          "code": "[Edit]\npublic edit DiscountPercent editLineDiscountPct(boolean _set = false, DiscountPercent _discountPct = 0)\n{\n    SalesLine salesLine = this;\n    DiscountPercent maxAllowedDiscount;\n    AmountMST newLineAmount;\n    \n    if (_set)\n    {\n        try\n        {\n            // Get maximum allowed discount from customer group or item group\n            CustTable custTable = CustTable::find(salesLine.CustAccount);\n            maxAllowedDiscount = CustGroup::find(custTable.CustGroup).MaxDiscountPct;\n            \n            // Validate discount doesn't exceed limits\n            if (_discountPct > maxAllowedDiscount && maxAllowedDiscount > 0)\n            {\n                throw error(strFmt(\"Discount %1% exceeds maximum allowed %2% for customer group %3\",\n                                 num2Str(_discountPct, 0, 2, 1, 1),\n                                 num2Str(maxAllowedDiscount, 0, 2, 1, 1),\n                                 custTable.CustGroup));\n            }\n            \n            // Apply discount and recalculate amounts\n            salesLine.LineDiscountPct = _discountPct;\n            \n            ttsbegin;\n            \n            // Recalculate line amount with new discount\n            newLineAmount = salesLine.QtyOrdered * salesLine.SalesPrice * (1 - (_discountPct / 100));\n            salesLine.LineAmount = newLineAmount;\n            \n            // Update sales tax if applicable\n            if (salesLine.TaxGroup)\n            {\n                salesLine.calcTax();\n            }\n            \n            // Log significant discount for audit trail\n            if (_discountPct > 10)\n            {\n                EventLog::writeEvent(EventLogType::Warning,\n                                   strFmt(\"High discount applied: %1% on sales order %2, line %3\",\n                                        num2Str(_discountPct, 0, 2, 1, 1),\n                                        salesLine.SalesId,\n                                        num2Str(salesLine.LineNum, 0, 2, 1, 1)));\n            }\n            \n            ttscommit;\n            \n            info(strFmt(\"Discount applied: %1%. New line amount: %2\",\n                       num2Str(_discountPct, 0, 2, 1, 1),\n                       num2Str(newLineAmount, 0, 2, 1, 1)));\n        }\n        catch (Exception::Error)\n        {\n            if (ttsLevel() > 0)\n            {\n                ttsabort;\n            }\n            // Reset to previous value on error\n            _discountPct = salesLine.LineDiscountPct;\n        }\n    }\n    \n    return salesLine.LineDiscountPct;\n}"
+        },
+        {
+          "title": "Inventory On-Hand with Reservations Display Method",
+          "description": "Advanced display method showing available inventory considering reservations, pending orders, and warehouse-specific logic",
+          "language": "xpp",
+          "code": "[Display]\npublic display InventQtyAvailPhysical availableQtyDisplay(InventDimId _inventDimId = '')\n{\n    InventTable inventTable = this;\n    InventDim inventDim;\n    InventQtyAvailPhysical availableQty = 0;\n    InventQtyAvailPhysical onHandQty = 0;\n    InventQtyAvailPhysical reservedQty = 0;\n    InventQtyAvailPhysical inTransitQty = 0;\n    \n    try\n    {\n        // Use provided dimension or get default\n        if (_inventDimId)\n        {\n            inventDim = InventDim::find(_inventDimId);\n        }\n        else\n        {\n            inventDim = InventDim::findOrCreate(InventTable::defaultInventDim());\n        }\n        \n        // Get on-hand quantity\n        InventSum inventSum;\n        select sum(PostedQty) from inventSum\n            where inventSum.ItemId == inventTable.ItemId\n                && inventSum.InventDimId == inventDim.inventDimId\n                && inventSum.PostedQty > 0;\n        \n        onHandQty = inventSum.PostedQty;\n        \n        // Calculate reserved quantities\n        InventTransOrigin inventTransOrigin;\n        InventTrans inventTrans;\n        \n        select sum(Qty) from inventTrans\n            join inventTransOrigin\n                where inventTrans.InventTransOrigin == inventTransOrigin.RecId\n                    && inventTrans.ItemId == inventTable.ItemId\n                    && inventTrans.InventDimId == inventDim.inventDimId\n                    && inventTrans.StatusIssue == StatusIssue::ReservPhysical\n                    && inventTrans.Qty < 0; // Negative qty = reservation\n        \n        reservedQty = abs(inventTrans.Qty);\n        \n        // Get in-transit quantities (purchase orders, transfer orders)\n        PurchLine purchLine;\n        select sum(RemainPurchPhysical) from purchLine\n            where purchLine.ItemId == inventTable.ItemId\n                && purchLine.InventDimId == inventDim.inventDimId\n                && purchLine.PurchStatus == PurchStatus::Order;\n        \n        inTransitQty = purchLine.RemainPurchPhysical;\n        \n        // Calculate truly available quantity\n        availableQty = onHandQty - reservedQty;\n        \n        // Include in-transit if warehouse policy allows\n        WHSParameters whsParameters = WHSParameters::find();\n        if (whsParameters && whsParameters.IncludeInTransitInAvailable)\n        {\n            availableQty += inTransitQty;\n        }\n        \n        // Ensure we don't show negative available (business rule)\n        availableQty = max(availableQty, 0);\n        \n    }\n    catch (Exception::Error)\n    {\n        // Log error but return 0 to prevent form crashes\n        EventLog::writeEvent(EventLogType::Error,\n                           strFmt(\"Error calculating available quantity for item %1: %2\",\n                                inventTable.ItemId,\n                                Exception::getLastError()));\n        availableQty = 0;\n    }\n    \n    return availableQty;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute on-demand and should be optimized for performance — avoid heavy database queries or complex calculations that run on every form refresh",
+        "Edit methods receive both current and new values, enabling validation, transformation, and cascading updates to related fields within the same transaction scope",
+        "Method parameters enable contextual calculations — display methods can accept dimensions, dates, or form state to provide dynamic results based on user context",
+        "The [Display] and [Edit] attributes are required and determine how the framework handles caching, dependencies, and UI integration for the calculated fields",
+        "Display/edit methods have full access to table context ('this' reference) and can call other table methods, access related tables, and execute business logic classes"
+      ],
+      "gotchas": [
+        "Never modify table fields directly in display methods — they should be read-only calculations. Use edit methods or separate business logic methods for data modifications to avoid unexpected side effects",
+        "Avoid SELECT statements without WHERE clauses in display methods — they execute frequently and can severely impact form performance. Always include proper filtering and consider caching strategies",
+        "Edit method parameter handling is tricky — the _set boolean determines if you're getting or setting the value. Forgetting to handle both cases will cause runtime errors or infinite loops"
+      ],
+      "performance_tips": [
+        "Cache expensive calculations using static variables or table field buffers, and invalidate cache when underlying data changes to balance performance with accuracy",
+        "Use exists joins instead of full record selection in display methods when you only need to check for record existence, and leverage query hints for complex calculations"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_queries",
+        "xpp_caching"
+      ],
+      "quiz": [
+        {
+          "q": "What happens when a display method throws an exception during form rendering?",
+          "options": [
+            "The entire form crashes and closes",
+            "The field shows an error message but form continues",
+            "The method returns null and field appears empty",
+            "The framework retries the method three times"
+          ],
+          "answer": 2,
+          "explanation": "When a display method throws an exception, the framework catches it and the field appears empty/null to prevent form crashes. It's best practice to handle exceptions within the method and return meaningful default values."
+        },
+        {
+          "q": "In an edit method, when should you use ttsbegin/ttscommit?",
+          "options": [
+            "Always, for every edit method",
+            "Never, the framework handles transactions automatically",
+            "Only when modifying multiple related fields or tables",
+            "Only when the edit method calls external services"
+          ],
+          "answer": 2,
+          "explanation": "Use ttsbegin/ttscommit in edit methods only when you need to modify multiple related fields or tables atomically. For single field updates, the framework's automatic transaction handling is sufficient and explicit transactions can interfere with form-level transaction management."
+        },
+        {
+          "q": "What is the most efficient way to check if a related record exists in a display method?",
+          "options": [
+            "Use a full SELECT statement and check if the record is found",
+            "Use an EXISTS JOIN to return a boolean result",
+            "Use firstOnly and check if RecId > 0",
+            "Use a COUNT query and check if result > 0"
+          ],
+          "answer": 1,
+          "explanation": "EXISTS JOIN is the most efficient because it stops searching as soon as the first matching record is found and returns a boolean, avoiding unnecessary data retrieval that full SELECT statements perform."
+        }
+      ]
+    },
+    "generated_date": "2026-06-09",
+    "auto_generated": true
   }
 ]

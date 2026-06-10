@@ -1,5 +1,13 @@
 [
   {
+    "date": "Jun 10",
+    "tag": "LESSON",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "id": "xpp_display_methods"
+  },
+  {
     "date": "Jun 09",
     "tag": "LESSON",
     "title": "Display & Edit Methods in X++",
@@ -230,13 +238,5 @@
     "section": "Reporting",
     "level": "Intermediate",
     "id": "rep_power_bi_d365"
-  },
-  {
-    "date": "May 11",
-    "tag": "LESSON",
-    "title": "Financial Reporting (Management Reporter)",
-    "section": "Reporting",
-    "level": "Intermediate",
-    "id": "rep_financial_reports"
   }
 ]

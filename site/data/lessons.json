@@ -8941,5 +8941,102 @@
     },
     "generated_date": "2026-06-09",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "xpp",
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "tables"
+    ],
+    "summary": "Master display and edit methods in X++ to create calculated fields, virtual columns, and custom data presentation logic in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable developers to create calculated fields and virtual data columns without physically storing values in database tables. These methods are essential for presenting computed data in forms, reports, and inquiries while maintaining clean database design. Display methods are read-only calculated fields that execute on-demand, while edit methods provide two-way data binding for virtual fields that can be modified by users. In D365 F&O, these methods are extensively used throughout the application framework for features like customer credit limits, inventory availability calculations, and financial totals. Understanding their proper implementation is crucial for building performant, maintainable customizations that integrate seamlessly with the standard application.",
+      "theory": "Display and edit methods leverage the X++ runtime's reflection capabilities and form data binding framework to provide dynamic field behavior. When a form loads, the FormDataSource automatically discovers display/edit methods through metadata scanning and creates virtual field bindings. The SysTableBrowser class and FormRun framework handle method invocation timing, caching display method results within the current record scope to avoid redundant calculations. Display methods execute in the table's execution context, providing access to all table fields and methods, while edit methods additionally implement getter/setter semantics for two-way binding. The AOT compiler generates special metadata for these methods, marking them with the DisplayMethodType and EditMethodType attributes for runtime discovery. Performance-wise, display methods execute synchronously on the client tier, making database-heavy calculations potentially expensive. The framework provides caching mechanisms through the Common.displayOptionValue() pattern and supports cross-table calculations via table relations and joins.",
+      "code_examples": [
+        {
+          "title": "Table Display Method - Customer Credit Available",
+          "description": "A production-grade display method calculating available customer credit with error handling and performance optimization",
+          "language": "xpp",
+          "code": "// On CustTable table\n[SysClientCacheDataMethodAttribute(true)]\ndisplay AmountMSTCur creditAvailable()\n{\n    CustCreditLimit     creditLimit;\n    AmountMSTCur        currentBalance, availableCredit;\n    \n    try\n    {\n        // Get credit limit from customer master\n        creditLimit = CustTable::find(this.AccountNum).CreditMax;\n        \n        if (creditLimit <= 0)\n        {\n            return 0; // No credit limit set\n        }\n        \n        // Calculate current balance using optimized query\n        select sum(AmountCur) from custTransOpen\n            where custTransOpen.AccountNum == this.AccountNum\n               && custTransOpen.TransType != CustTransType::Payment;\n        \n        currentBalance = custTransOpen.AmountCur;\n        availableCredit = creditLimit - currentBalance;\n        \n        return max(availableCredit, 0);\n    }\n    catch (Exception::Error)\n    {\n        error(\"Error calculating credit available for customer %1\", this.AccountNum);\n        return 0;\n    }\n}\n\n// Usage in form: this method appears as a virtual field\n// Automatically cached per record during form session"
+        },
+        {
+          "title": "Form Edit Method - Sales Line Extended Price",
+          "description": "Edit method with two-way binding for calculated price that users can override",
+          "language": "xpp",
+          "code": "// On SalesLine table\nprivate AmountCur extendedPriceOverride;\n\nedit AmountCur extendedPrice(boolean _set = false, AmountCur _value = 0)\n{\n    AmountCur calculatedPrice;\n    \n    if (_set)\n    {\n        // User is setting a custom value\n        this.extendedPriceOverride = _value;\n        \n        // Trigger recalculation of dependent fields\n        this.salesTable_ds().object(fieldNum(SalesLine, LineAmount)).dataChanged();\n        \n        return this.extendedPriceOverride;\n    }\n    else\n    {\n        // Return override if set, otherwise calculate\n        if (this.extendedPriceOverride != 0)\n        {\n            return this.extendedPriceOverride;\n        }\n        \n        try\n        {\n            calculatedPrice = this.SalesPrice * this.SalesQty;\n            \n            // Apply trade agreements and discounts\n            PriceDisc priceDisc = PriceDisc::newFromSalesLine(this);\n            calculatedPrice = priceDisc.findPrice(calculatedPrice);\n            \n            // Apply line discount\n            calculatedPrice *= (100 - this.LinePercent) / 100;\n            \n            return calculatedPrice;\n        }\n        catch (Exception::Error)\n        {\n            warning(\"Could not calculate extended price for line %1\", this.LineNum);\n            return this.SalesPrice * this.SalesQty; // Fallback calculation\n        }\n    }\n}\n\npublic void clearExtendedPriceOverride()\n{\n    this.extendedPriceOverride = 0;\n}"
+        },
+        {
+          "title": "Advanced Display Method with Cross-Company Data",
+          "description": "Display method accessing related company data with proper security context and caching",
+          "language": "xpp",
+          "code": "// On VendTable table - show total purchase volume across companies\n[SysClientCacheDataMethodAttribute(false)] // Don't cache cross-company data\ndisplay AmountMST totalPurchaseVolume12Months()\n{\n    VendTrans       vendTrans;\n    PurchTable      purchTable;\n    AmountMST       totalAmount;\n    TransDate       fromDate;\n    container       allowedCompanies;\n    str             currentCompany;\n    int             i;\n    \n    try\n    {\n        fromDate = DateTimeUtil::addMonths(DateTimeUtil::utcNow(), -12);\n        totalAmount = 0;\n        \n        // Get companies where user has access to vendor data\n        allowedCompanies = Security::allowedCompaniesForTable(tableNum(VendTable));\n        \n        for (i = 1; i <= conLen(allowedCompanies); i++)\n        {\n            currentCompany = conPeek(allowedCompanies, i);\n            \n            // Use changecompany to switch context\n            changecompany(currentCompany)\n            {\n                while select sum(AmountMST) from vendTrans\n                    exists join purchTable\n                        where purchTable.PurchId == vendTrans.Voucher\n                           && purchTable.VendAccount == this.AccountNum\n                           && vendTrans.TransDate >= fromDate\n                           && vendTrans.TransType == CustVendTransType::Invoice\n                {\n                    totalAmount += vendTrans.AmountMST;\n                }\n            }\n        }\n        \n        return totalAmount;\n    }\n    catch (Exception::Error)\n    {\n        warning(\"Error calculating purchase volume for vendor %1: %2\", \n                this.AccountNum, CLRInterop::getLastException().ToString());\n        return 0;\n    }\n}\n\n// Performance note: This method should be used sparingly\n// Consider batch processing for reports with many records"
+        }
+      ],
+      "key_points": [
+        "Display methods are read-only calculated fields that execute on-demand and should use [SysClientCacheDataMethodAttribute] for performance optimization",
+        "Edit methods provide two-way binding with _set parameter for user input and automatic form control integration",
+        "Methods execute in table context with access to all table fields and relations, but database operations should be minimized for performance",
+        "Use changecompany() carefully in display methods as cross-company queries are expensive and can impact form responsiveness",
+        "Always implement proper error handling with try/catch blocks since exceptions in display methods can crash forms or reports"
+      ],
+      "gotchas": [
+        "Display method caching is per-record only — changing related data won't refresh cached values until record navigation, use refresh() or dataSource.reread() when needed",
+        "Edit methods must handle both getter (_set=false) and setter (_set=true) scenarios — forgetting the setter logic breaks form editing capabilities",
+        "Database queries in display methods block the UI thread — use async patterns or batch processing for expensive calculations to avoid form freezing"
+      ],
+      "performance_tips": [
+        "Cache expensive calculations using [SysClientCacheDataMethodAttribute(true)] and implement cache invalidation when dependent data changes",
+        "Use exists joins instead of nested selects in display methods to minimize database round trips and improve query performance"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_select",
+        "xpp_forms"
+      ],
+      "quiz": [
+        {
+          "q": "What parameter signature is required for an edit method to support two-way data binding?",
+          "options": [
+            "edit ReturnType methodName()",
+            "edit ReturnType methodName(boolean _set, ReturnType _value)",
+            "edit ReturnType methodName(ReturnType _value = 0)",
+            "edit ReturnType methodName(boolean _get = true)"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods require 'boolean _set' and a typed '_value' parameter to handle both getter (_set=false) and setter (_set=true) operations for two-way binding."
+        },
+        {
+          "q": "When should you use [SysClientCacheDataMethodAttribute(false)] on a display method?",
+          "options": [
+            "When the method performs expensive calculations",
+            "When the method accesses cross-company or frequently changing data",
+            "When the method returns null values",
+            "Never, caching should always be enabled"
+          ],
+          "answer": 1,
+          "explanation": "Use [SysClientCacheDataMethodAttribute(false)] when display methods access cross-company data or frequently changing values that shouldn't be cached per record."
+        },
+        {
+          "q": "What happens if an exception is thrown in a display method without proper error handling?",
+          "options": [
+            "The form displays an empty value",
+            "The application continues normally",
+            "The form or report can crash or become unresponsive",
+            "The method retries automatically"
+          ],
+          "answer": 2,
+          "explanation": "Unhandled exceptions in display methods can crash forms or reports because they execute during UI rendering. Always use try/catch blocks with appropriate fallback values."
+        }
+      ]
+    },
+    "generated_date": "2026-06-10",
+    "auto_generated": true
   }
 ]

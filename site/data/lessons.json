@@ -9038,5 +9038,102 @@
     },
     "generated_date": "2026-06-10",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "x++",
+      "display-methods",
+      "forms",
+      "ui-binding",
+      "calculated-fields"
+    ],
+    "summary": "Master display and edit methods to create calculated fields, custom formatting, and dynamic UI behavior in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that enable dynamic field calculation, custom formatting, and interactive UI behavior in D365 F&O forms and reports. These methods bridge the gap between raw data and user presentation, allowing you to compute values on-the-fly, format data contextually, and create editable calculated fields. Unlike simple field bindings, display/edit methods execute during form refresh cycles and can access the full object context, making them essential for complex business logic presentation. Understanding their execution lifecycle, performance implications, and proper implementation patterns is crucial for building responsive, maintainable D365 applications.",
+      "theory": "Display methods are special X++ methods marked with the [Display] attribute that return computed values for form controls or report fields. They execute during form data source refresh cycles and can access the current record's full context. Edit methods, marked with [Edit], extend this concept by allowing users to modify calculated values, with the method handling the reverse calculation to update underlying data. The D365 kernel automatically calls these methods when bound controls need refreshing, making them reactive to data changes. The method signature must match specific patterns: display methods return the display value type, while edit methods take a parameter of the edit value type and typically return boolean to indicate success. These methods integrate deeply with the SysDA (System Data Access) layer and form data source caching mechanisms, requiring careful consideration of when and how frequently they execute to avoid performance bottlenecks.",
+      "code_examples": [
+        {
+          "title": "Basic Display Method on Table",
+          "description": "A display method on CustTable that calculates and formats a customer's total open balance",
+          "language": "xpp",
+          "code": "[Display]\nstatic str custBalanceDisplay(CustTable _custTable)\n{\n    CustTrans custTrans;\n    AmountMST balance = 0;\n    \n    if (!_custTable.AccountNum)\n        return '';\n    \n    try\n    {\n        select sum(AmountMST) from custTrans\n            where custTrans.AccountNum == _custTable.AccountNum\n               && custTrans.TransType != LedgerTransType::Collection;\n        \n        balance = custTrans.AmountMST;\n        \n        // Format with currency symbol\n        return strFmt('%1 %2', \n                     _custTable.currency(),\n                     num2Str(balance, -1, 2, 1, 1));\n    }\n    catch (Exception::Error)\n    {\n        return 'Error calculating balance';\n    }\n}"
+        },
+        {
+          "title": "Edit Method with Data Modification",
+          "description": "An edit method that allows modifying a calculated discount percentage and updates the underlying line discount amount",
+          "language": "xpp",
+          "code": "[Edit]\nboolean salesLineDiscountPctEdit(SalesLine _salesLine, Percent _discountPct)\n{\n    AmountCur newDiscountAmount;\n    boolean ret = false;\n    \n    if (_discountPct < 0 || _discountPct > 100)\n    {\n        checkFailed('Discount percentage must be between 0 and 100');\n        return false;\n    }\n    \n    ttsbegin;\n    try\n    {\n        // Calculate new discount amount based on percentage\n        newDiscountAmount = _salesLine.LineAmount * (_discountPct / 100);\n        \n        // Update the actual discount field\n        _salesLine.LineDisc = newDiscountAmount;\n        _salesLine.update();\n        \n        // Recalculate line totals\n        _salesLine.calcLineAmount();\n        \n        info(strFmt('Line discount updated to %1%% (%2)', \n                    _discountPct, \n                    num2Str(newDiscountAmount, -1, 2, 1, 1)));\n        \n        ret = true;\n        ttscommit;\n    }\n    catch (Exception::Error)\n    {\n        ttsabort;\n        error('Failed to update discount percentage');\n    }\n    \n    return ret;\n}\n\n[Display]\nstatic Percent salesLineDiscountPctDisplay(SalesLine _salesLine)\n{\n    if (_salesLine.LineAmount == 0)\n        return 0;\n    \n    return (_salesLine.LineDisc / _salesLine.LineAmount) * 100;\n}"
+        },
+        {
+          "title": "Complex Display Method with Caching",
+          "description": "A performance-optimized display method with result caching for expensive calculations",
+          "language": "xpp",
+          "code": "public class InventTableDisplayMethods\n{\n    private static Map inventQtyCache;\n    \n    [Display]\n    static str inventOnHandQtyAllSitesDisplay(InventTable _inventTable)\n    {\n        InventSum inventSum;\n        Real totalQty = 0;\n        str cacheKey;\n        str result;\n        \n        if (!_inventTable.ItemId)\n            return '';\n        \n        // Initialize cache if needed\n        if (!inventQtyCache)\n            inventQtyCache = new Map(Types::String, Types::String);\n        \n        cacheKey = _inventTable.ItemId;\n        \n        // Check cache first (valid for current session)\n        if (inventQtyCache.exists(cacheKey))\n        {\n            return inventQtyCache.lookup(cacheKey);\n        }\n        \n        try\n        {\n            // Aggregate across all sites and warehouses\n            while select sum(AvailPhysical) from inventSum\n                where inventSum.ItemId == _inventTable.ItemId\n                   && inventSum.Closed == NoYes::No\n            {\n                totalQty += inventSum.AvailPhysical;\n            }\n            \n            // Format with UOM\n            result = strFmt('%1 %2', \n                           num2Str(totalQty, -1, 2, 1, 0),\n                           _inventTable.baseUOM());\n            \n            // Cache result\n            inventQtyCache.insert(cacheKey, result);\n        }\n        catch (Exception::Error)\n        {\n            result = 'Calc error';\n        }\n        \n        return result;\n    }\n    \n    // Clear cache when inventory changes\n    public static void clearInventQtyCache(ItemId _itemId = '')\n    {\n        if (!inventQtyCache)\n            return;\n            \n        if (_itemId)\n            inventQtyCache.remove(_itemId);\n        else\n            inventQtyCache = null; // Clear all\n    }\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute during form refresh cycles and must be lightweight to avoid UI lag — cache expensive calculations where possible",
+        "Edit methods must handle data validation, error cases, and transaction boundaries properly using ttsbegin/ttscommit patterns",
+        "Method signatures are strict: display methods return the value type, edit methods take the new value as parameter and return boolean success",
+        "Use static methods when possible to avoid object instantiation overhead, especially for simple calculations",
+        "Consider form data source caching behavior — display methods may be called multiple times for the same record during a single refresh cycle"
+      ],
+      "gotchas": [
+        "Display methods called on inactive form records still execute — always validate record state and key fields to avoid null reference exceptions",
+        "Edit method parameter binding can fail silently if the method signature doesn't exactly match the expected pattern — verify return type and parameter types",
+        "Recursive display method calls through form refresh events can cause stack overflow — avoid triggering form refreshes within display methods"
+      ],
+      "performance_tips": [
+        "Implement result caching for expensive calculations using static Maps or temporary tables, with cache invalidation on underlying data changes",
+        "Use query hints and joins instead of multiple select statements when calculating aggregated values across related tables"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_queries",
+        "xpp_caching"
+      ],
+      "quiz": [
+        {
+          "q": "What is the correct signature for a display method that shows a formatted currency amount?",
+          "options": [
+            "display Amount showAmount()",
+            "[Display] static str showAmount(CommonTable _table)",
+            "public str displayAmount()",
+            "[Display] Amount getAmount(CommonTable _table)"
+          ],
+          "answer": 1,
+          "explanation": "Display methods must use [Display] attribute, be static when possible, return the display type (usually str for formatted values), and take the table/record as parameter."
+        },
+        {
+          "q": "When should you implement caching in display methods?",
+          "options": [
+            "Always, for all display methods",
+            "Never, the framework handles caching",
+            "When the calculation involves expensive operations like complex queries or external calls",
+            "Only for edit methods"
+          ],
+          "answer": 2,
+          "explanation": "Caching should be implemented when display methods perform expensive operations, as they execute frequently during form refresh cycles and can impact UI responsiveness."
+        },
+        {
+          "q": "What must an edit method return to indicate successful processing?",
+          "options": [
+            "The new calculated value",
+            "void (no return value)",
+            "boolean true",
+            "The updated record"
+          ],
+          "answer": 2,
+          "explanation": "Edit methods must return boolean true to indicate successful processing, which tells the framework that the edit operation completed successfully and the display should be refreshed."
+        }
+      ]
+    },
+    "generated_date": "2026-06-11",
+    "auto_generated": true
   }
 ]

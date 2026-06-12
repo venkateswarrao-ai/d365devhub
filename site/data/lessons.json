@@ -9135,5 +9135,102 @@
     },
     "generated_date": "2026-06-11",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display",
+      "edit",
+      "forms",
+      "tables",
+      "ui"
+    ],
+    "summary": "Master display and edit methods in X++ to create calculated fields, validate data, and extend form behavior without modifying table schemas.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ constructs that allow you to create virtual fields on forms and reports without modifying the underlying table structure. Display methods calculate and show read-only values, while edit methods enable users to input data that triggers custom business logic. These methods are crucial for extending D365 F&O functionality without customizing core AOT objects.\n\nIn enterprise D365 implementations, display and edit methods solve common scenarios like showing calculated totals, concatenated names, status descriptions, or allowing temporary data entry that drives complex validation or workflow processes. They execute on the client tier, making them ideal for real-time user interactions while maintaining separation between data storage and presentation logic.\n\nUnderstanding their lifecycle, performance implications, and integration with the form framework is essential for building responsive, maintainable solutions that align with Microsoft's extension-first development philosophy.",
+      "theory": "Display and edit methods are special X++ methods decorated with [Display] and [Edit] attributes that integrate seamlessly with the SysTableBrowser framework and form datasource architecture. When bound to form controls, these methods are automatically called during form refresh cycles, providing dynamic content without database roundtrips.\n\nThe method signature must follow strict conventions: display methods return a value and accept no parameters (except optional FormRun), while edit methods are void and accept both the new value and optional FormRun parameter. The return type determines the Extended Data Type (EDT) used for form binding, affecting control rendering and validation behavior.\n\nInternally, the kernel caches display method results per record to avoid redundant calculations during single form refresh cycles. However, this cache is cleared on datasource reread() or refresh() operations. The FormDataSource class manages method execution timing, ensuring proper integration with form validation, field modification tracking, and the broader application framework including RunBase dialogs and SysOperation services.",
+      "code_examples": [
+        {
+          "title": "Basic Display Method - Customer Full Name",
+          "description": "Shows how to create a calculated field that concatenates first and last names with proper null handling",
+          "language": "xpp",
+          "code": "[DataMemberAttribute, Display]\npublic display Name customerFullName()\n{\n    DirPerson person;\n    DirPartyTable dirPartyTable;\n    \n    if (!this.Party)\n        return '';\n    \n    select FirstName, LastName from person\n        exists join dirPartyTable\n        where dirPartyTable.RecId == person.DirParty &&\n              dirPartyTable.RecId == this.Party;\n    \n    if (person.FirstName && person.LastName)\n    {\n        return person.FirstName + ' ' + person.LastName;\n    }\n    else if (person.FirstName)\n    {\n        return person.FirstName;\n    }\n    else if (person.LastName)\n    {\n        return person.LastName;\n    }\n    \n    return this.Name; // Fallback to account name\n}\n\n// Usage in form: Add string control, set DataMethod property to 'customerFullName'"
+        },
+        {
+          "title": "Advanced Edit Method with Validation",
+          "description": "Demonstrates edit method with complex validation, temporary storage, and integration with form framework",
+          "language": "xpp",
+          "code": "[DataMemberAttribute, Edit]\npublic edit void editDiscountPercent(boolean _set, Percent _discountPercent)\n{\n    if (_set)\n    {\n        if (_discountPercent < 0 || _discountPercent > 100)\n        {\n            throw error(\"@SYS25252\"); // Percentage must be between 0 and 100\n        }\n        \n        // Check authorization for discount limits\n        if (_discountPercent > 20 && !SecurityRights::hasMenuItemAccess(menuItemActionStr(SalesTableListPage), MenuItemType::Action))\n        {\n            throw error(strFmt(\"@SYS308557\", _discountPercent)); // Not authorized for discount %1\n        }\n        \n        ttsbegin;\n        try\n        {\n            // Store in temporary field or update related records\n            this.DiscountPercent = _discountPercent;\n            \n            // Recalculate dependent fields\n            this.recalculateAmounts();\n            \n            // Mark record as modified\n            this.skipDataMethods(false);\n            this.write();\n            \n            ttscommit;\n            info(strFmt(\"Discount updated to %1%%\", _discountPercent));\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            throw;\n        }\n    }\n    else\n    {\n        return this.DiscountPercent;\n    }\n}\n\nprivate void recalculateAmounts()\n{\n    this.LineAmount = this.Qty * this.SalesPrice;\n    this.DiscountAmount = this.LineAmount * this.DiscountPercent / 100;\n    this.NetAmount = this.LineAmount - this.DiscountAmount;\n}"
+        },
+        {
+          "title": "Display Method with Form Context",
+          "description": "Shows how to access form context and datasource information within display methods for dynamic behavior",
+          "language": "xpp",
+          "code": "[DataMemberAttribute, Display]\npublic display AmountMST calculatedBalance(FormRun _formRun = null)\n{\n    CustTrans custTrans;\n    AmountMST balance;\n    FormDataSource custTableDS;\n    \n    if (!this.AccountNum)\n        return 0;\n    \n    try\n    {\n        // Access form context for additional filtering\n        if (_formRun)\n        {\n            custTableDS = _formRun.dataSource(dataSourceStr(CustTableListPage, CustTable));\n            \n            // Use form's current date filter if available\n            TransDate filterDate = custTableDS ? custTableDS.queryBuildDataSource().findRange(fieldStr(CustTable, ModifiedDateTime)).value() : systemDateGet();\n        }\n        \n        select sum(AmountCur) from custTrans\n            where custTrans.AccountNum == this.AccountNum &&\n                  custTrans.TransDate <= (filterDate ? str2Date(filterDate, 321) : systemDateGet()) &&\n                  custTrans.TransType != LedgerTransType::ClosingSheet;\n        \n        balance = CurrencyExchangeHelper::calculateAccountingAmount(\n            custTrans.AmountCur,\n            this.Currency,\n            CompanyInfo::standardCurrency(),\n            systemDateGet()\n        );\n    }\n    catch (Exception::Error)\n    {\n        // Log error but don't break form\n        EventLog::writeError(\"Failed to calculate customer balance\", this.AccountNum);\n        balance = 0;\n    }\n    \n    return balance;\n}\n\n// Advanced: Display method with caching for performance\nstatic Map displayMethodCache = new Map(Types::String, Types::Container);\n\n[DataMemberAttribute, Display]\npublic display Percent utilizationRate()\n{\n    str cacheKey = strFmt(\"%1_%2\", this.ResourceId, DateTimeUtil::date(DateTimeUtil::utcNow()));\n    container cachedValue = displayMethodCache.lookup(cacheKey);\n    \n    if (cachedValue)\n    {\n        return conPeek(cachedValue, 1);\n    }\n    \n    // Expensive calculation here...\n    Percent rate = this.calculateUtilizationRate();\n    \n    // Cache for 5 minutes\n    displayMethodCache.insert(cacheKey, [rate, DateTimeUtil::utcNow()]);\n    \n    return rate;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods must be marked with [DataMemberAttribute, Display] and return a value — they cannot modify data or have side effects",
+        "Edit methods require [DataMemberAttribute, Edit] attributes and use boolean _set parameter pattern for both getting and setting values",
+        "Method names become available as DataMethod properties on form controls — use descriptive names that indicate their purpose",
+        "Display methods execute on every form refresh — implement caching for expensive calculations to avoid performance bottlenecks",
+        "Edit methods should include comprehensive validation and error handling since they often represent critical business logic entry points"
+      ],
+      "gotchas": [
+        "Never perform database writes in display methods — they execute frequently and will cause performance issues and data consistency problems. Use edit methods or form event handlers instead",
+        "Display method caching is per-record and cleared on datasource refresh — don't rely on cache persistence across user actions or form navigation",
+        "Edit method validation exceptions should use throw error() instead of return false — the form framework expects exceptions for proper user feedback and transaction rollback"
+      ],
+      "performance_tips": [
+        "Cache expensive calculations in display methods using static Maps with time-based expiration to reduce database roundtrips during form operations",
+        "Use exists joins instead of select count() in display methods when checking for related record existence — it's significantly faster for large datasets"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_tables",
+        "xpp_validation"
+      ],
+      "quiz": [
+        {
+          "q": "What happens when a display method throws an exception during form refresh?",
+          "options": [
+            "The form crashes",
+            "The field shows empty and logs an error",
+            "The entire datasource refresh fails",
+            "The method returns null automatically"
+          ],
+          "answer": 1,
+          "explanation": "Display methods should handle exceptions gracefully. If unhandled, the framework catches them, logs the error, and shows an empty value in the field to prevent form crashes."
+        },
+        {
+          "q": "In an edit method, when should you perform the actual data modification?",
+          "options": [
+            "Always immediately when called",
+            "Only when _set parameter is true",
+            "Only when _set parameter is false",
+            "In a separate validation method"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods use the _set parameter to distinguish between get (_set=false) and set (_set=true) operations. Data modification should only occur when _set is true."
+        },
+        {
+          "q": "Why should display methods avoid database writes?",
+          "options": [
+            "They run in read-only mode",
+            "They execute frequently during form refresh",
+            "They don't have transaction context",
+            "The compiler prevents it"
+          ],
+          "answer": 1,
+          "explanation": "Display methods execute on every form refresh, datasource navigation, and field updates. Database writes would cause severe performance issues and potential data corruption."
+        }
+      ]
+    },
+    "generated_date": "2026-06-12",
+    "auto_generated": true
   }
 ]

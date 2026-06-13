@@ -1,5 +1,13 @@
 [
   {
+    "date": "Jun 13",
+    "tag": "LESSON",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "id": "xpp_display_methods"
+  },
+  {
     "date": "Jun 12",
     "tag": "LESSON",
     "title": "Display & Edit Methods in X++",
@@ -225,14 +233,6 @@
   },
   {
     "date": "May 15",
-    "tag": "LESSON",
-    "title": "Display & Edit Methods in X++",
-    "section": "X++ Language",
-    "level": "Intermediate",
-    "id": "xpp_display_methods"
-  },
-  {
-    "date": "May 14",
     "tag": "LESSON",
     "title": "Display & Edit Methods in X++",
     "section": "X++ Language",

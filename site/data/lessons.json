@@ -9232,5 +9232,103 @@
     },
     "generated_date": "2026-06-12",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "25 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "calculated-fields",
+      "ui-binding"
+    ],
+    "summary": "Master display and edit methods in X++ to create calculated fields, custom UI behaviors, and data validation in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ patterns that enable calculated fields, custom formatting, and interactive UI behaviors in D365 F&O. Display methods provide read-only calculated values that appear as virtual fields on forms and reports, while edit methods create editable calculated fields with custom validation logic. These methods are essential for extending standard functionality without modifying base tables, implementing complex business logic in the UI layer, and creating responsive user experiences that adapt to data context. Understanding when to use display methods versus computed columns, edit methods versus form controls, and how they integrate with the D365 form binding architecture is crucial for building maintainable enterprise solutions.",
+      "theory": "Display and edit methods leverage D365's form data binding infrastructure through the FormDataSource and FormControl framework. When a form loads, the kernel automatically discovers methods with [SysClientCacheDataMethodAttribute] or legacy display/edit keywords and creates virtual field bindings. Display methods execute during form refresh cycles and their results are cached client-side until the record changes. Edit methods participate in the form's data validation pipeline, with changes triggering validateWrite() and other table events. The SysTableBrowser and FormRun classes coordinate method execution timing, while FormDataFieldEventArgs provides context during UI events. Performance-wise, display methods should avoid database queries since they execute frequently during grid scrolling. Instead, use technique like caching results in temporary table fields or leveraging FormDataSource's executeQuery() override for batch data loading. The AOT metadata system recognizes these methods for IntelliSense and form designer integration through the DictMethod and DictTable reflection classes.",
+      "code_examples": [
+        {
+          "title": "Table Display Method with Caching",
+          "description": "Display method on CustTable showing customer's total balance with intelligent caching",
+          "language": "xpp",
+          "code": "// CustTable table - Display method for customer total balance\n[SysClientCacheDataMethodAttribute(true)]\ndisplay AmountMST totalBalance()\n{\n    CustTrans custTrans;\n    AmountMST balance = 0;\n    \n    // Cache the result in a temporary field to avoid repeated calculations\n    if (this.TotalBalanceCache == 0 && this.AccountNum)\n    {\n        select sum(AmountMST) from custTrans\n            where custTrans.AccountNum == this.AccountNum\n               && custTrans.TransType != CustTransType::Payment;\n        \n        balance = custTrans.AmountMST;\n        \n        // Store in temporary field for caching\n        this.TotalBalanceCache = balance;\n    }\n    \n    return this.TotalBalanceCache ? this.TotalBalanceCache : balance;\n}\n\n// Supporting method to clear cache when needed\npublic void clearBalanceCache()\n{\n    this.TotalBalanceCache = 0;\n}"
+        },
+        {
+          "title": "Form Edit Method with Validation",
+          "description": "Edit method on SalesTable form enabling custom discount calculation with business rules",
+          "language": "xpp",
+          "code": "// SalesTable form - Edit method for calculated discount percentage\nedit Percent customDiscountPct(boolean _set = false, Percent _discountPct = 0)\n{\n    SalesLine salesLine;\n    AmountCur totalLineAmount = 0;\n    Percent calculatedDiscount = 0;\n    \n    if (_set)\n    {\n        // Validation: Check if discount is within allowed range\n        if (_discountPct < 0 || _discountPct > 50)\n        {\n            error(\"@SYS18447\"); // \"The value must be between 0 and 50\"\n            return this.CustomDiscountPct;\n        }\n        \n        // Business rule: VIP customers can have higher discounts\n        CustTable custTable = CustTable::find(this.CustAccount);\n        if (_discountPct > 25 && custTable.CustGroup != 'VIP')\n        {\n            warning(\"Discount over 25% requires VIP customer status\");\n        }\n        \n        ttsbegin;\n        try\n        {\n            // Apply discount to all sales lines\n            while select forupdate salesLine\n                where salesLine.SalesId == this.SalesId\n            {\n                salesLine.LinePercent = _discountPct;\n                salesLine.update();\n            }\n            \n            this.CustomDiscountPct = _discountPct;\n            ttscommit;\n            \n            // Refresh form to show updated line amounts\n            this.dataSource().research();\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            error(\"Failed to apply discount to sales lines\");\n        }\n    }\n    \n    return this.CustomDiscountPct;\n}"
+        },
+        {
+          "title": "Advanced Display Method with Form Context",
+          "description": "Complex display method accessing form context and multiple data sources for calculated status",
+          "language": "xpp",
+          "code": "// InventTable form - Display method showing availability status across warehouses\n[SysClientCacheDataMethodAttribute(false)] // Don't cache - data changes frequently\ndisplay InventAvailabilityStatus availabilityStatus()\n{\n    InventOnHand inventOnHand;\n    InventDim inventDim;\n    FormRun formRun;\n    FormDataSource inventDimDataSource;\n    InventAvailabilityStatus status = InventAvailabilityStatus::Unknown;\n    Real totalAvailable = 0;\n    \n    // Access form context to get current warehouse filter\n    formRun = this.dataSource().formRun();\n    if (formRun)\n    {\n        inventDimDataSource = formRun.dataSource(formDataSourceStr(InventTable, InventDim));\n        if (inventDimDataSource)\n        {\n            inventDim = inventDimDataSource.cursor();\n        }\n    }\n    \n    // Calculate availability across warehouses\n    while select sum(AvailPhysical) from inventOnHand\n        group by InventLocationId\n        where inventOnHand.ItemId == this.ItemId\n           && (!inventDim.InventLocationId || \n               inventOnHand.InventLocationId == inventDim.InventLocationId)\n    {\n        totalAvailable += inventOnHand.AvailPhysical;\n    }\n    \n    // Determine status based on availability and safety stock\n    if (totalAvailable <= 0)\n        status = InventAvailabilityStatus::OutOfStock;\n    else if (totalAvailable < this.SafetyStockQty)\n        status = InventAvailabilityStatus::LowStock;\n    else if (totalAvailable > this.MaxInventQty * 1.2)\n        status = InventAvailabilityStatus::Overstock;\n    else\n        status = InventAvailabilityStatus::Available;\n    \n    return status;\n}\n\n// Enum for availability status\nenum InventAvailabilityStatus\n{\n    Unknown,\n    Available,\n    LowStock,\n    OutOfStock,\n    Overstock\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods create virtual read-only fields that appear in forms and reports without modifying table structure",
+        "Edit methods enable custom editable calculated fields with full validation and business logic integration",
+        "Use [SysClientCacheDataMethodAttribute] to control client-side caching behavior based on data volatility",
+        "Access form context through dataSource().formRun() to interact with other form controls and data sources",
+        "Display methods execute during every form refresh — avoid expensive database operations and implement caching strategies"
+      ],
+      "gotchas": [
+        "Display methods without caching attribute execute on every grid row scroll — this kills performance with database queries. Always use [SysClientCacheDataMethodAttribute(true)] for expensive calculations or cache results in temporary table fields",
+        "Edit methods don't automatically trigger form refresh — call dataSource().research() or specific control refresh methods after modifying data to update dependent display methods and calculations",
+        "Accessing form controls directly in table display methods breaks the MVC pattern and causes null reference exceptions when called from reports or batch jobs — use form context access patterns or create separate form-specific display methods"
+      ],
+      "performance_tips": [
+        "Cache expensive display method calculations in temporary table fields and clear cache only when underlying data changes using table event handlers",
+        "Use joins and aggregate queries in display methods rather than while-select loops to minimize database round trips and improve grid scrolling performance"
+      ],
+      "related_topics": [
+        "xpp_tables",
+        "xpp_classes",
+        "xpp_forms",
+        "xpp_validation"
+      ],
+      "quiz": [
+        {
+          "q": "What is the primary difference between a display method and an edit method in X++?",
+          "options": [
+            "Display methods are faster than edit methods",
+            "Display methods provide read-only calculated values while edit methods create editable fields with validation",
+            "Edit methods can only be used on forms, display methods work everywhere",
+            "Display methods cache automatically, edit methods never cache"
+          ],
+          "answer": 1,
+          "explanation": "Display methods create virtual read-only fields that show calculated values, while edit methods create editable calculated fields that participate in the form's data validation pipeline and can modify underlying data when changed."
+        },
+        {
+          "q": "When should you use [SysClientCacheDataMethodAttribute(false)] on a display method?",
+          "options": [
+            "When the calculated value changes frequently and must always be current",
+            "When the method performs expensive database operations",
+            "When the method accesses form controls",
+            "Never - caching should always be enabled for performance"
+          ],
+          "answer": 0,
+          "explanation": "Use [SysClientCacheDataMethodAttribute(false)] when the calculated value changes frequently and you need real-time updates, such as inventory availability or financial balances that change often throughout the day."
+        },
+        {
+          "q": "How should you access form context from within a table display method?",
+          "options": [
+            "Use element.control() directly",
+            "Access through global form variables",
+            "Use this.dataSource().formRun() to get the form context safely",
+            "Display methods cannot access form context"
+          ],
+          "answer": 2,
+          "explanation": "Use this.dataSource().formRun() to safely access the form context from a table display method. This approach works when called from forms and returns null when called from reports or batch jobs, preventing runtime errors."
+        }
+      ]
+    },
+    "generated_date": "2026-06-13",
+    "auto_generated": true
   }
 ]

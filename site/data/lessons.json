@@ -9330,5 +9330,102 @@
     },
     "generated_date": "2026-06-13",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "forms",
+      "ui-extension",
+      "calculated-fields"
+    ],
+    "summary": "Master display and edit methods for creating calculated fields, form extensions, and dynamic UI behavior in D365 F&O applications.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ language features that enable dynamic field behavior in forms and reports without modifying base table structures. These methods execute on the client side and provide calculated values, formatting, or editable computed fields that respond to user interactions in real-time.\n\nIn D365 F&O, display/edit methods are essential for extending standard forms, creating composite fields, implementing business logic in grid columns, and providing user-friendly data representations. They're particularly powerful when combined with form extensions and Chain of Command patterns, allowing you to enhance Microsoft's standard forms without overlayering.\n\nUnlike traditional database computed columns, display/edit methods execute in the application tier and can access complex business logic, related table data, and user context. This makes them ideal for scenarios like calculating aged balances, formatting composite addresses, or providing drill-down capabilities from summary data.",
+      "theory": "Display methods are client-side X++ methods that return calculated values for form controls, while edit methods provide both get and set functionality for computed fields. Both are declared with the [Display] or [Edit] attribute and must follow specific signature patterns to integrate with the form runtime.\n\nThe D365 form runtime automatically discovers these methods through reflection and binds them to form controls via the DataMethod property. When a form loads, the kernel creates method delegates and caches them for performance. The SysFormRun and FormDataSource classes orchestrate method execution, handling refresh patterns and dependency tracking.\n\nDisplay methods execute during form refresh cycles triggered by datasource events like active(), reread(), or refresh(). The form runtime tracks field dependencies through the SysSetupFormRun framework, ensuring methods recalculate when underlying data changes. For edit methods, the kernel provides automatic validation integration through the SysFormDataSource.validateWrite() pipeline, allowing business logic validation before persisting changes.\n\nPerformance-wise, display/edit methods introduce client-server round trips for each calculation. The kernel optimizes this through batch calls and caching, but excessive method usage can impact form responsiveness. The SysQuery framework can pre-calculate values on the server side for better performance in complex scenarios.",
+      "code_examples": [
+        {
+          "title": "Basic Display Method with Customer Balance Calculation",
+          "description": "Demonstrates a display method that calculates and formats customer balance with proper error handling and caching",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Display method to show formatted customer balance\n/// </summary>\n/// <returns>Formatted balance string</returns>\n[Display]\npublic display Amount displayCustomerBalance()\n{\n    Amount balance;\n    CustTrans custTrans;\n    \n    try\n    {\n        if (this.AccountNum)\n        {\n            select sum(AmountMST) from custTrans\n                where custTrans.AccountNum == this.AccountNum\n                   && custTrans.TransType != CustTransType::Payment;\n                   \n            balance = custTrans.AmountMST;\n        }\n    }\n    catch (Exception::Error)\n    {\n        error(strFmt(\"@SYS318447\", this.AccountNum)); // Error calculating balance for customer %1\n        balance = 0;\n    }\n    \n    return balance;\n}\n\n/// <summary>\n/// Display method with formatted output and currency symbol\n/// </summary>\n[Display]\npublic display str displayFormattedBalance()\n{\n    Amount balance = this.displayCustomerBalance();\n    CompanyInfo companyInfo = CompanyInfo::find();\n    \n    return strFmt(\"%1 %2\", \n                  num2Str(balance, -1, 2, 1, 1), \n                  Currency::symbol(companyInfo.CurrencyCode));\n}"
+        },
+        {
+          "title": "Edit Method with Validation and Business Logic",
+          "description": "Shows an edit method implementation with proper validation, change tracking, and integration with form datasource events",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Edit method for composite customer name field\n/// Combines first and last name with validation\n/// </summary>\nprotected str customerFullName;\n\n[Edit]\npublic edit str editCustomerFullName(boolean _set = false, str _value = \"\")\n{\n    DirPerson dirPerson;\n    DirPartyTable dirPartyTable;\n    \n    if (_set)\n    {\n        // Parse full name into components\n        container nameParts = str2con(_value, \" \");\n        \n        if (conLen(nameParts) < 2)\n        {\n            throw error(\"@SYS335876\"); // Full name must contain first and last name\n        }\n        \n        try\n        {\n            ttsbegin;\n            \n            // Find or create person record\n            select forupdate dirPerson\n                join dirPartyTable\n                where dirPartyTable.RecId == this.Party\n                   && dirPartyTable.RecId == dirPerson.RecId;\n                   \n            if (!dirPerson.RecId)\n            {\n                dirPerson.clear();\n                dirPerson.RecId = this.Party;\n            }\n            \n            dirPerson.FirstName = conPeek(nameParts, 1);\n            dirPerson.LastName = conPeek(nameParts, conLen(nameParts));\n            \n            // Handle middle names if present\n            if (conLen(nameParts) > 2)\n            {\n                str middleNames = \"\";\n                int i;\n                \n                for (i = 2; i < conLen(nameParts); i++)\n                {\n                    middleNames += conPeek(nameParts, i) + \" \";\n                }\n                \n                dirPerson.MiddleName = strRTrim(middleNames);\n            }\n            \n            if (dirPerson.validateWrite())\n            {\n                dirPerson.write();\n                customerFullName = _value;\n            }\n            else\n            {\n                throw error(\"@SYS54508\"); // Validation failed\n            }\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            error(\"@SYS317963\"); // Error updating customer name\n        }\n    }\n    else\n    {\n        // Get current value\n        select dirPerson\n            join dirPartyTable\n            where dirPartyTable.RecId == this.Party\n               && dirPartyTable.RecId == dirPerson.RecId;\n               \n        if (dirPerson.RecId)\n        {\n            customerFullName = strFmt(\"%1 %2 %3\", \n                                    dirPerson.FirstName,\n                                    dirPerson.MiddleName ? dirPerson.MiddleName + \" \" : \"\",\n                                    dirPerson.LastName);\n        }\n    }\n    \n    return customerFullName;\n}"
+        },
+        {
+          "title": "Advanced Display Method with Caching and Performance Optimization",
+          "description": "Production-grade display method with intelligent caching, batch processing, and form refresh optimization",
+          "language": "xpp",
+          "code": "/// <summary>\n/// Cached display method for inventory on-hand with performance optimization\n/// </summary>\nprotected Map inventOnHandCache;\nprotected utcdatetime lastCacheRefresh;\n\n[Display]\npublic display Real displayInventOnHand()\n{\n    InventTable inventTable = this; // Assuming this is called on InventTable\n    Real onHandQty;\n    utcdatetime currentTime = DateTimeUtil::utcNow();\n    \n    // Initialize cache if needed\n    if (!inventOnHandCache)\n    {\n        inventOnHandCache = new Map(Types::String, Types::Real);\n    }\n    \n    // Refresh cache if older than 5 minutes\n    if (!lastCacheRefresh || \n        DateTimeUtil::getDifference(currentTime, lastCacheRefresh) > 300)\n    {\n        this.refreshInventoryCache();\n        lastCacheRefresh = currentTime;\n    }\n    \n    // Try to get from cache first\n    if (inventOnHandCache.exists(inventTable.ItemId))\n    {\n        onHandQty = inventOnHandCache.lookup(inventTable.ItemId);\n    }\n    else\n    {\n        // Fallback to direct calculation\n        onHandQty = this.calculateOnHandQty(inventTable.ItemId);\n        inventOnHandCache.insert(inventTable.ItemId, onHandQty);\n    }\n    \n    return onHandQty;\n}\n\n/// <summary>\n/// Batch refresh method for inventory cache\n/// </summary>\nprotected void refreshInventoryCache()\n{\n    InventSum inventSum;\n    FormDataSource formDataSource;\n    InventTable inventTableLocal;\n    \n    if (!inventOnHandCache)\n        return;\n        \n    try\n    {\n        // Get form datasource to determine which items to cache\n        formDataSource = this.dataSource();\n        \n        if (formDataSource)\n        {\n            inventOnHandCache.clear();\n            \n            // Batch select for visible items\n            while select ItemId from inventTableLocal\n                where inventTableLocal.dataAreaId == curext()\n            {\n                select sum(AvailPhysical) from inventSum\n                    where inventSum.ItemId == inventTableLocal.ItemId\n                       && inventSum.Closed == NoYes::No;\n                       \n                inventOnHandCache.insert(inventTableLocal.ItemId, inventSum.AvailPhysical);\n            }\n        }\n    }\n    catch (Exception::Error)\n    {\n        warning(\"@SYS317964\"); // Unable to refresh inventory cache\n    }\n}\n\nprotected Real calculateOnHandQty(ItemId _itemId)\n{\n    InventSum inventSum;\n    \n    select sum(AvailPhysical) from inventSum\n        where inventSum.ItemId == _itemId\n           && inventSum.Closed == NoYes::No;\n           \n    return inventSum.AvailPhysical;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute on the client-side and must be marked with [Display] attribute — they provide read-only calculated values for forms and reports",
+        "Edit methods require both get and set logic with _set parameter — they enable two-way data binding for computed fields with validation",
+        "Method signatures must match exact patterns: display methods return values, edit methods use boolean _set parameter with optional _value parameter",
+        "Form runtime discovers methods via reflection and binds them through DataMethod property on form controls — no manual registration required",
+        "Performance optimization requires caching strategies and batch calculations — avoid database calls in frequently-executed display methods"
+      ],
+      "gotchas": [
+        "Never perform write operations in display methods — they're called during form refresh cycles and will cause transaction conflicts and performance issues",
+        "Edit method validation failures must use throw error() not return false — returning false doesn't prevent the value from being set in the UI control",
+        "Method names must be unique within the inheritance hierarchy — duplicate method names cause compilation errors even with different signatures"
+      ],
+      "performance_tips": [
+        "Implement caching with time-based expiration for expensive calculations — use Maps or temporary tables to store computed values and refresh periodically",
+        "Use batch processing in display methods when possible — select multiple records at once rather than individual lookups for each row in grids"
+      ],
+      "related_topics": [
+        "xpp_forms",
+        "xpp_coc",
+        "xpp_tables"
+      ],
+      "quiz": [
+        {
+          "q": "What happens if you perform a ttscommit inside a display method during a form refresh?",
+          "options": [
+            "The transaction commits successfully",
+            "A deadlock exception occurs",
+            "The form refresh completes normally",
+            "The display method returns null"
+          ],
+          "answer": 1,
+          "explanation": "Display methods execute within the form's refresh transaction context. Calling ttscommit inside a display method creates nested transactions and often leads to deadlocks because the form runtime expects the transaction to remain open."
+        },
+        {
+          "q": "Which attribute is required for the D365 form runtime to recognize an edit method?",
+          "options": [
+            "[Edit]",
+            "[FormMethod]",
+            "[Display]",
+            "[ClientMethod]"
+          ],
+          "answer": 0,
+          "explanation": "[Edit] attribute is required for edit methods. This attribute tells the form runtime that the method provides two-way data binding functionality with get/set semantics."
+        },
+        {
+          "q": "When implementing caching in display methods, what's the most important consideration for cache invalidation?",
+          "options": [
+            "Memory usage limits",
+            "Time-based expiration",
+            "User session boundaries",
+            "Transaction boundaries"
+          ],
+          "answer": 1,
+          "explanation": "Time-based expiration is most critical because display methods execute frequently during form operations. Without proper time-based cache invalidation, users will see stale data, especially in multi-user environments where underlying data changes frequently."
+        }
+      ]
+    },
+    "generated_date": "2026-06-14",
+    "auto_generated": true
   }
 ]

@@ -9427,5 +9427,102 @@
     },
     "generated_date": "2026-06-14",
     "auto_generated": true
+  },
+  {
+    "id": "xpp_display_methods",
+    "title": "Display & Edit Methods in X++",
+    "section": "X++ Language",
+    "level": "Intermediate",
+    "duration": "12 min read",
+    "tags": [
+      "display-methods",
+      "edit-methods",
+      "ui-binding",
+      "forms",
+      "table-methods"
+    ],
+    "summary": "Master display and edit methods in X++ for dynamic UI calculations, field formatting, and real-time data presentation in D365 F&O forms and reports.",
+    "content": {
+      "overview": "Display and edit methods are fundamental X++ patterns for creating calculated fields, formatting data, and enabling dynamic user interactions in D365 F&O forms. These methods execute on-demand when the UI needs to refresh field values, making them essential for real-time calculations, status indicators, and derived field displays. Unlike stored fields, display methods compute values dynamically, while edit methods provide controlled data entry with validation and formatting.\n\nDisplay methods are particularly powerful for showing aggregated data, formatted strings, or conditional values without storing redundant information in the database. Edit methods complement this by allowing users to input data that gets parsed and distributed to multiple underlying fields. Both patterns are extensively used throughout standard D365 applications, from financial calculations in the General Ledger to inventory status displays in Warehouse Management.\n\nUnderstanding these methods is crucial for intermediate developers because they bridge the gap between data storage and user experience, enabling sophisticated UI behaviors while maintaining clean data architecture. They're also performance-critical components that can significantly impact form responsiveness if not implemented correctly.",
+      "theory": "Display and edit methods are special table methods decorated with the [SysClientCacheDataMethodAttribute] for client-side caching or executed server-side for each record. The kernel automatically detects methods named with 'display' or 'edit' prefixes and makes them available as field sources in form data sources. The method signature must match specific patterns: display methods return the value type and take no parameters (except optional FormControl), while edit methods are void and accept the new value plus optional FormControl.\n\nThe D365 framework uses these methods extensively in classes like FormDataSource, FormRun, and the SysTableBrowser. When bound to form controls, the kernel manages the method invocation lifecycle, calling display methods during form refresh cycles and edit methods during data validation phases. The SysSetupFormRun and FormCommandButtonControl classes demonstrate advanced patterns for conditional method execution and UI state management.\n\nPerformance optimization occurs through client-side caching when methods are marked with appropriate attributes. The kernel batches method calls and caches results per record, but uncached methods execute on every UI refresh. Methods can access the current record's buffer through 'this' context, enabling complex calculations across related tables through joins or table lookups. The SysQuery and Query classes often support display method data sourcing for complex aggregations.",
+      "code_examples": [
+        {
+          "title": "Customer Balance Display Method",
+          "description": "Calculates and displays real-time customer balance with proper error handling and caching",
+          "language": "xpp",
+          "code": "// On CustTable table\n[SysClientCacheDataMethodAttribute(true)]\ndisplay CurrencyAmountMST customerBalance()\n{\n    CustTrans custTrans;\n    CurrencyAmountMST balance = 0;\n    \n    try\n    {\n        // Use select statement for aggregation\n        select sum(AmountMST) from custTrans\n            where custTrans.AccountNum == this.AccountNum\n                && custTrans.Closed == NoYes::No;\n        \n        balance = custTrans.AmountMST;\n    }\n    catch (Exception::Error)\n    {\n        // Log error but don't break form display\n        warning(\"Unable to calculate customer balance for account: \" + this.AccountNum);\n        balance = 0;\n    }\n    \n    return balance;\n}\n\n// Display method for status with conditional formatting\n[SysClientCacheDataMethodAttribute(true)]\ndisplay str customerStatusDisplay()\n{\n    str statusText;\n    \n    switch (this.CustGroup)\n    {\n        case '10': // VIP customers\n            statusText = \"VIP Customer\";\n            break;\n        case '20': // Standard customers\n            statusText = this.Blocked != CustVendorBlocked::No ? \"Blocked\" : \"Active\";\n            break;\n        default:\n            statusText = \"Standard\";\n    }\n    \n    return statusText;\n}"
+        },
+        {
+          "title": "Sales Line Edit Method",
+          "description": "Edit method for quantity input with validation and automatic price calculation",
+          "language": "xpp",
+          "code": "// On SalesLine table\nedit SalesQty lineQuantityEdit(boolean _set, SalesQty _qty, FormStringControl _formControl = null)\n{\n    SalesTable salesTable;\n    InventTable inventTable;\n    \n    if (_set)\n    {\n        // Validation before setting value\n        if (_qty <= 0)\n        {\n            throw error(\"Quantity must be greater than zero\");\n        }\n        \n        // Get inventory item for validation\n        inventTable = InventTable::find(this.ItemId);\n        if (!inventTable)\n        {\n            throw error(strFmt(\"Item %1 not found\", this.ItemId));\n        }\n        \n        // Check available inventory\n        if (_qty > this.availableInventory())\n        {\n            if (Box::yesNo(\"Quantity exceeds available inventory. Continue?\", DialogButton::No) == DialogButton::No)\n            {\n                return this.SalesQty;\n            }\n        }\n        \n        ttsbegin;\n        try\n        {\n            // Set the quantity\n            this.SalesQty = _qty;\n            \n            // Automatically recalculate price based on quantity breaks\n            this.recalculateLinePrice();\n            \n            // Update delivery date if needed\n            salesTable = this.salesTable();\n            if (salesTable.DeliveryDate < DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()))\n            {\n                this.ReceiptDateRequested = DateTimeUtil::getSystemDate(DateTimeUtil::getUserPreferredTimeZone()) + 7;\n            }\n            \n            ttscommit;\n        }\n        catch (Exception::Error)\n        {\n            ttsabort;\n            throw;\n        }\n        \n        // Refresh form control if provided\n        if (_formControl)\n        {\n            _formControl.refresh();\n        }\n    }\n    \n    return this.SalesQty;\n}\n\n// Helper method for price recalculation\nprivate void recalculateLinePrice()\n{\n    TradeAgreementPriceDisc tradeAgreement;\n    PriceDiscResultFields priceResult;\n    \n    // Find applicable trade agreements\n    tradeAgreement = TradeAgreementPriceDisc::newFromSalesLine(this);\n    priceResult = tradeAgreement.findPriceAgreement(\n        PriceDiscType::LineDiscSales,\n        this.ItemId,\n        this.SalesQty,\n        this.salesTable().CustAccount);\n    \n    if (priceResult.Amount != 0)\n    {\n        this.SalesPrice = priceResult.Amount;\n        info(strFmt(\"Price updated to %1 based on quantity %2\", this.SalesPrice, this.SalesQty));\n    }\n}"
+        },
+        {
+          "title": "Advanced Display Method with Form Control Integration",
+          "description": "Display method that changes behavior based on form context and user permissions",
+          "language": "xpp",
+          "code": "// On InventTable table - advanced display method with form integration\ndisplay str inventoryStatusDisplay(FormControl _formControl = null)\n{\n    InventSum inventSum;\n    str statusDisplay;\n    FormRun formRun;\n    SecurityRights viewRights;\n    \n    // Check user permissions for detailed inventory view\n    viewRights = SecurityRights::Construct();\n    if (!viewRights.sysEntryPointAttribute(menuItemDisplayStr(InventOnHand)))\n    {\n        return \"Restricted\";\n    }\n    \n    try\n    {\n        // Get current form context if available\n        if (_formControl)\n        {\n            formRun = _formControl.formRun();\n            \n            // Modify display based on form context\n            if (formRun && classStr(InventTableListPage) == className(formRun))\n            {\n                // Simplified display for list pages\n                select firstonly sum(PhysicalInvent) from inventSum\n                    where inventSum.ItemId == this.ItemId;\n                    \n                statusDisplay = inventSum.PhysicalInvent > 0 ? \"In Stock\" : \"Out of Stock\";\n            }\n            else\n            {\n                // Detailed display for forms\n                statusDisplay = this.buildDetailedInventoryStatus();\n            }\n        }\n        else\n        {\n            // Default behavior when no form control\n            statusDisplay = this.buildDetailedInventoryStatus();\n        }\n    }\n    catch (Exception::Error)\n    {\n        statusDisplay = \"Error\";\n        warning(strFmt(\"Unable to retrieve inventory status for item %1\", this.ItemId));\n    }\n    \n    return statusDisplay;\n}\n\nprivate str buildDetailedInventoryStatus()\n{\n    InventSum inventSum;\n    container statusParts = conNull();\n    str finalStatus;\n    \n    while select inventSum\n        where inventSum.ItemId == this.ItemId\n    {\n        if (inventSum.PhysicalInvent != 0)\n        {\n            statusParts = conIns(statusParts, conLen(statusParts) + 1,\n                strFmt(\"%1: %2\", inventSum.InventDimId, inventSum.PhysicalInvent));\n        }\n    }\n    \n    if (conLen(statusParts) == 0)\n    {\n        finalStatus = \"No inventory\";\n    }\n    else if (conLen(statusParts) == 1)\n    {\n        finalStatus = con2Str(statusParts, 1);\n    }\n    else\n    {\n        finalStatus = strFmt(\"Multiple locations (%1)\", conLen(statusParts));\n    }\n    \n    return finalStatus;\n}"
+        }
+      ],
+      "key_points": [
+        "Display methods execute on every form refresh — use SysClientCacheDataMethodAttribute(true) for performance optimization on calculated fields",
+        "Edit methods must handle both getting and setting values through the boolean _set parameter, enabling two-way data binding with validation",
+        "Method names must start with 'display' or 'edit' prefixes for the kernel to recognize them as UI-bindable methods",
+        "Display methods should include try/catch blocks to prevent form crashes from calculation errors, returning safe default values on exceptions",
+        "Edit methods should use ttsbegin/ttscommit for transactional data updates and call dependent field recalculations when values change"
+      ],
+      "gotchas": [
+        "Never perform DML operations in display methods — they execute frequently and will cause performance degradation and potential transaction conflicts",
+        "Avoid complex joins or multiple table lookups in uncached display methods — each form refresh triggers execution for every visible record, creating N+1 query problems",
+        "Don't forget to handle the _set parameter correctly in edit methods — missing the boolean check will cause the method to always execute the set logic, breaking form data retrieval"
+      ],
+      "performance_tips": [
+        "Use SysClientCacheDataMethodAttribute for display methods that don't change frequently — this moves execution to the client and caches results per record until form refresh",
+        "Consider using computed columns or views for complex aggregations instead of display methods when the calculation is expensive and used across multiple forms"
+      ],
+      "related_topics": [
+        "xpp_select",
+        "xpp_forms",
+        "xpp_tables"
+      ],
+      "quiz": [
+        {
+          "q": "What attribute should you use to optimize display method performance by caching results on the client?",
+          "options": [
+            "[SysEntryPointAttribute]",
+            "[SysClientCacheDataMethodAttribute(true)]",
+            "[SysObsoleteAttribute]",
+            "[DataMemberAttribute]"
+          ],
+          "answer": 1,
+          "explanation": "SysClientCacheDataMethodAttribute(true) enables client-side caching of display method results, reducing server round-trips and improving form responsiveness by caching values until the next form refresh."
+        },
+        {
+          "q": "In an edit method, how do you determine whether the method should return the current value or set a new value?",
+          "options": [
+            "Check if the FormControl parameter is null",
+            "Use the boolean _set parameter",
+            "Check the method return type",
+            "Use a static flag variable"
+          ],
+          "answer": 1,
+          "explanation": "Edit methods use the boolean _set parameter to determine operation mode: when _set is false, return the current value; when _set is true, validate and set the new value passed in the second parameter."
+        },
+        {
+          "q": "Why should you avoid performing insert(), update(), or delete() operations directly in display methods?",
+          "options": [
+            "Display methods run in read-only mode",
+            "It causes compilation errors",
+            "Display methods execute frequently during form refreshes, causing performance issues",
+            "Database operations are not allowed in table methods"
+          ],
+          "answer": 2,
+          "explanation": "Display methods execute on every form refresh and for every visible record, so DML operations would create severe performance problems and potential data corruption. They should only perform calculations and return formatted values."
+        }
+      ]
+    },
+    "generated_date": "2026-06-15",
+    "auto_generated": true
   }
 ]
